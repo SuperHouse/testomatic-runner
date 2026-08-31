@@ -8,21 +8,36 @@ version = "0.1.0"
 description = "Test runner that executes a Testomatic Test Suite Package against real hardware via testomatic-io."
 readme = "README.md"
 authors = [
-  {name = "Jonathan Oxer and Elena Williams"}
+  {name = "Jonathan Oxer", email = "jon@oxer.com.au"},
+  {name = "Elena Williams"}
 ]
 maintainers = [
-  {name = "Jonathan Oxer and Elena Williams"}
+  {name = "Jonathan Oxer", email = "jon@oxer.com.au"},
+  {name = "Elena Williams"}
 ]
+classifiers = [
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+    "License :: OSI Approved :: MIT License",
+]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+
+[project.scripts]
+testomatic = "testomatic.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
 # testomatic-io pulls in gpiod (libgpiod's Python bindings), which has a native extension that
 # only builds on Linux (needs linux/const.h) -- kept out of core dependencies so `pip install
 # -e ".[dev]"` keeps working on a Mac dev machine. Install this extra on the Raspberry Pi itself.
-pi = ["testomatic-io>=0.1.0"]
+# >=0.1.1 (not yet published, see testomatic-io's own pyproject.toml) because 0.1.0 fails a fresh
+# install on current Raspberry Pi OS -- see testomatic-io's BLINKA_REMOVAL_PLAN.md "Motivation".
+pi = ["testomatic-io>=0.1.1"]
 
 [project.urls]
 Homepage = "https://github.com/SuperHouse/testomatic-runner"
+bugs = "https://github.com/SuperHouse/testomatic-runner/issues"
 
 [tool.setuptools.packages.find]
 include = ["testomatic*"]
