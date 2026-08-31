@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "testomatic-runner"
+version = "0.1.0"
+description = "Test runner that executes a Testomatic Test Suite Package against real hardware via testomatic-io."
+readme = "README.md"
+authors = [
+  {name = "Jonathan Oxer and Elena Williams"}
+]
+maintainers = [
+  {name = "Jonathan Oxer and Elena Williams"}
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# testomatic-io pulls in gpiod (libgpiod's Python bindings), which has a native extension that
+# only builds on Linux (needs linux/const.h) -- kept out of core dependencies so `pip install
+# -e ".[dev]"` keeps working on a Mac dev machine. Install this extra on the Raspberry Pi itself.
+pi = ["testomatic-io>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/SuperHouse/testomatic-runner"
+
+[tool.setuptools.packages.find]
+include = ["testomatic*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Puts the repo root on sys.path during test collection so `import testomatic` works whether or
+# not the package is installed.
+pythonpath = ["."]
+# Suite/step domain types are named Test*/TestRunner (matching Register's own model names);
+# without this, pytest tries to collect them as test classes and warns since they have __init__.
+python_classes = ["*Tests"]
