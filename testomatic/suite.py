@@ -58,6 +58,7 @@ class TestSuiteFile:
     test_suite: TestSuiteMeta
     test_steps: list[TestStep]
     manual_checks: list[ManualCheck]
+    package_dir: Path | None = None
 
 
 def load_suite(path: str | Path) -> TestSuiteFile:
@@ -65,36 +66,57 @@ def load_suite(path: str | Path) -> TestSuiteFile:
 
     `path` may point directly at a Test Suite Definition JSON file, or at a Test Suite Package
     ZIP archive (see test-suite-package.md) — the package's wrapped test-suite-definition.json is
-    located and parsed automatically.
+    located and parsed automatically. Either way, the returned `TestSuiteFile.package_dir` is the
+    directory other files a step references (e.g. a firmware step's `firmware_file`) resolve
+    relative to — see `_extract_package()`/`steps/firmware.py`.
     """
     path = Path(path)
     if path.suffix == ".zip":
-        text = _read_definition_from_package(path)
+        text, package_dir = _extract_package(path)
     else:
-        text = path.read_text()
-    return parse_suite(json.loads(text))
+        text, package_dir = path.read_text(), path.parent
+    return parse_suite(json.loads(text), package_dir=package_dir)
 
 
-def _read_definition_from_package(path: Path) -> str:
-    """Finds and reads test-suite-definition.json from inside a Test Suite Package ZIP.
+def _extract_package(path: Path) -> tuple[str, Path]:
+    """Extracts every file from a Test Suite Package ZIP alongside `path`, producing
+    `path.parent/<top-level-folder>/...` — the same self-contained folder the ZIP already wraps
+    everything in (see test-suite-package.md). Returns the definition JSON's text plus that
+    folder, which other config fields (e.g. a firmware step's `firmware_file`) resolve relative
+    to. The top-level folder's name is read from the archive itself rather than assumed from
+    `path`'s own name, matching how the definition file is located below.
+
+    Re-extracting on every load is deliberate: it's what keeps files on disk in sync if the same
+    `path` is ever loaded again after the package it points at has changed underneath it.
+    """
+    with zipfile.ZipFile(path) as archive:
+        definition_entry = _find_definition_entry(archive, path)
+        archive.extractall(path.parent)
+        text = archive.read(definition_entry).decode("utf-8")
+
+    package_dir = path.parent / Path(definition_entry).parent
+    return text, package_dir
+
+
+def _find_definition_entry(archive: zipfile.ZipFile, path: Path) -> str:
+    """Finds test-suite-definition.json's entry name inside a Test Suite Package ZIP.
 
     Located by filename suffix rather than a hardcoded path, since the definition sits inside a
     top-level folder named after the package (e.g. `abc-hw1-0-test-suite-v3/test-suite-
     definition.json`), not at the archive root.
     """
-    with zipfile.ZipFile(path) as archive:
-        matches = [name for name in archive.namelist() if name.endswith(TEST_SUITE_DEFINITION_FILENAME)]
-        if not matches:
-            raise SuiteFormatError(f"No {TEST_SUITE_DEFINITION_FILENAME} found in Test Suite Package {path}")
-        if len(matches) > 1:
-            raise SuiteFormatError(
-                f"Multiple {TEST_SUITE_DEFINITION_FILENAME} entries found in Test Suite Package "
-                f"{path}: {matches}"
-            )
-        return archive.read(matches[0]).decode("utf-8")
+    matches = [name for name in archive.namelist() if name.endswith(TEST_SUITE_DEFINITION_FILENAME)]
+    if not matches:
+        raise SuiteFormatError(f"No {TEST_SUITE_DEFINITION_FILENAME} found in Test Suite Package {path}")
+    if len(matches) > 1:
+        raise SuiteFormatError(
+            f"Multiple {TEST_SUITE_DEFINITION_FILENAME} entries found in Test Suite Package "
+            f"{path}: {matches}"
+        )
+    return matches[0]
 
 
-def parse_suite(data: dict) -> TestSuiteFile:
+def parse_suite(data: dict, package_dir: Path | None = None) -> TestSuiteFile:
     """Parse and validate a Test Suite JSON export already loaded as a dict."""
     export_schema_version = _require(data, "export_schema_version")
     if export_schema_version != SUPPORTED_EXPORT_SCHEMA_VERSION:
@@ -118,6 +140,7 @@ def parse_suite(data: dict) -> TestSuiteFile:
         test_suite=_parse_test_suite_meta(_require(data, "test_suite")),
         test_steps=test_steps,
         manual_checks=manual_checks,
+        package_dir=package_dir,
     )
 
 

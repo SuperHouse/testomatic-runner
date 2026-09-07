@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
 
 from testomatic.steps import (
@@ -14,6 +15,24 @@ from testomatic.steps import (
     power,
     python_step,
 )
+
+
+class _FakeCompletedProcess:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _capturing_run(captured):
+    """A subprocess.run() replacement that records the command it was called with (into
+    `captured["command"]`) and always reports success."""
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return _FakeCompletedProcess()
+
+    return fake_run
 
 
 def test_delay_sleeps_for_delay_ms(monkeypatch, context):
@@ -136,11 +155,229 @@ def test_iomod_analog_write_records_value(context):
     assert context.chassis.iomod.analog[("B", 3)] == 1500
 
 
-def test_firmware_upload_stub_prints_and_passes(context, capsys):
-    result = firmware.execute({}, context)
+def test_avrdude_fails_when_no_firmware_file_attached(context):
+    result = firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p"}, context
+    )
+
+    assert not result.passed
+    assert "No firmware file attached" in result.message
+
+
+def test_avrdude_fails_when_firmware_file_missing_from_package_dir(context, tmp_path):
+    context.package_dir = tmp_path
+
+    result = firmware.execute_avrdude(
+        {
+            "port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p",
+            "firmware_file": "main.hex",
+        },
+        context,
+    )
+
+    assert not result.passed
+    assert "not found" in result.message
+
+
+def test_avrdude_builds_command_and_reports_success(monkeypatch, context, tmp_path):
+    firmware_file = tmp_path / "main.hex"
+    firmware_file.write_text(":00000001FF")
+    context.package_dir = tmp_path
+
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return _FakeCompletedProcess(returncode=0, stdout="avrdude done")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = firmware.execute_avrdude(
+        {
+            "port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p",
+            "baud_rate": 115200, "firmware_file": "main.hex",
+        },
+        context,
+    )
 
     assert result.passed
-    assert "Firmware upload" in capsys.readouterr().out
+    assert captured["command"] == [
+        "avrdude",
+        "-c", "arduino",
+        "-p", "atmega328p",
+        "-P", "/dev/ttyUSB0",
+        "-b", "115200",
+        "-U", f"flash:w:{firmware_file}:i",
+    ]
+
+
+def test_avrdude_uses_context_tool_path_override(monkeypatch, context, tmp_path):
+    (tmp_path / "main.hex").write_text(":00000001FF")
+    context.package_dir = tmp_path
+    context.avrdude_path = "/opt/avrdude/bin/avrdude"
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+
+    firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
+        context,
+    )
+
+    assert captured["command"][0] == "/opt/avrdude/bin/avrdude"
+
+
+def test_avrdude_reports_tool_not_found(monkeypatch, context, tmp_path):
+    (tmp_path / "main.hex").write_text(":00000001FF")
+    context.package_dir = tmp_path
+
+    def fake_run(command, **kwargs):
+        raise FileNotFoundError("no such file: avrdude")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
+        context,
+    )
+
+    assert not result.passed
+    assert "not found" in result.message
+
+
+def test_avrdude_reports_nonzero_exit_as_failure(monkeypatch, context, tmp_path):
+    (tmp_path / "main.hex").write_text(":00000001FF")
+    context.package_dir = tmp_path
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **kwargs: _FakeCompletedProcess(returncode=1, stderr="avrdude: verification error"),
+    )
+
+    result = firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
+        context,
+    )
+
+    assert not result.passed
+    assert "exited 1" in result.message
+
+
+def test_esptool_fails_when_no_images_attached(context):
+    result = firmware.execute_esptool({"chip": "esp32", "port": "/dev/ttyUSB0"}, context)
+
+    assert not result.passed
+    assert "No firmware images attached" in result.message
+
+
+def test_esptool_flashes_multiple_images_in_order(monkeypatch, context, tmp_path):
+    (tmp_path / "bootloader.bin").write_bytes(b"boot")
+    (tmp_path / "app.bin").write_bytes(b"app")
+    context.package_dir = tmp_path
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+
+    result = firmware.execute_esptool(
+        {
+            "chip": "esp32", "port": "/dev/ttyUSB0", "baud_rate": 460800,
+            "images": [
+                {"address": "0x1000", "file": "bootloader.bin"},
+                {"address": "0x10000", "file": "app.bin"},
+            ],
+        },
+        context,
+    )
+
+    assert result.passed
+    assert captured["command"] == [
+        "esptool.py",
+        "--chip", "esp32",
+        "--port", "/dev/ttyUSB0",
+        "--baud", "460800",
+        "write_flash",
+        "0x1000", str(tmp_path / "bootloader.bin"),
+        "0x10000", str(tmp_path / "app.bin"),
+    ]
+
+
+def test_esptool_fails_when_an_image_file_is_missing(context, tmp_path):
+    context.package_dir = tmp_path
+
+    result = firmware.execute_esptool(
+        {"chip": "esp32", "port": "/dev/ttyUSB0", "images": [{"address": "0x1000", "file": "missing.bin"}]},
+        context,
+    )
+
+    assert not result.passed
+    assert "not found" in result.message
+
+
+def test_openocd_builds_program_command_with_flash_address(monkeypatch, context, tmp_path):
+    firmware_file = tmp_path / "app.bin"
+    firmware_file.write_bytes(b"app")
+    context.package_dir = tmp_path
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+
+    result = firmware.execute_openocd(
+        {
+            "interface_config": "interface/stlink.cfg", "target_config": "target/stm32f4x.cfg",
+            "adapter_serial": "1234", "flash_address": "0x08000000", "firmware_file": "app.bin",
+        },
+        context,
+    )
+
+    assert result.passed
+    assert captured["command"] == [
+        "openocd",
+        "-f", "interface/stlink.cfg",
+        "-f", "target/stm32f4x.cfg",
+        "-c", "adapter serial 1234",
+        "-c", f"program {firmware_file} 0x08000000 verify reset exit",
+    ]
+
+
+def test_openocd_fails_when_no_firmware_file_attached(context):
+    result = firmware.execute_openocd(
+        {"interface_config": "interface/stlink.cfg", "target_config": "target/stm32f4x.cfg"}, context
+    )
+
+    assert not result.passed
+    assert "No firmware file attached" in result.message
+
+
+def test_stm32cubeprogrammer_builds_command_with_port_and_flash_address(monkeypatch, context, tmp_path):
+    firmware_file = tmp_path / "app.bin"
+    firmware_file.write_bytes(b"app")
+    context.package_dir = tmp_path
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+
+    result = firmware.execute_stm32cubeprogrammer(
+        {
+            "connection_interface": "SWD", "port": "066FFF", "flash_address": "0x08000000",
+            "firmware_file": "app.bin",
+        },
+        context,
+    )
+
+    assert result.passed
+    assert captured["command"] == [
+        "STM32_Programmer_CLI",
+        "-c", "port=SWD sn=066FFF",
+        "-w", str(firmware_file),
+        "0x08000000",
+        "-v", "-rst",
+    ]
+
+
+def test_stm32cubeprogrammer_fails_when_no_firmware_file_attached(context):
+    result = firmware.execute_stm32cubeprogrammer({"connection_interface": "SWD"}, context)
+
+    assert not result.passed
+    assert "No firmware file attached" in result.message
 
 
 def test_led_spectral_reading_stub_prints_and_passes(context, capsys):

@@ -6,13 +6,14 @@ from testomatic.runner import TestRunner
 from testomatic.suite import Design, TestStep, TestSuiteFile, TestSuiteMeta
 
 
-def make_suite(steps):
+def make_suite(steps, package_dir=None):
     return TestSuiteFile(
         export_schema_version=1,
         design=Design(id=1, sku="X", name="X", hw_version="1"),
         test_suite=TestSuiteMeta(version=1, status="DRAFT", notes=None, created_dt="now"),
         test_steps=steps,
         manual_checks=[],
+        package_dir=package_dir,
     )
 
 
@@ -85,3 +86,28 @@ def test_unknown_step_type_fails_without_crashing(chassis, test_module):
 
     assert not report.passed
     assert not report.outcomes[0].result.passed
+
+
+def test_run_exposes_suite_package_dir_to_step_executors(chassis, test_module, tmp_path):
+    """A firmware step's executor resolves firmware_file/images relative to context.package_dir
+    (see steps/firmware.py), so run() must copy it over from the suite being run before executing
+    any steps."""
+    runner = TestRunner(chassis, test_module)
+    suite = make_suite([make_step(1, "DELAY", {"delay_ms": 0})], package_dir=tmp_path)
+
+    runner.run(suite)
+
+    assert runner.context.package_dir == tmp_path
+
+
+def test_tool_path_overrides_are_passed_through_to_context(chassis, test_module):
+    runner = TestRunner(
+        chassis, test_module,
+        avrdude_path="/opt/avrdude", esptool_path="/opt/esptool.py",
+        openocd_path="/opt/openocd", stm32cubeprogrammer_path="/opt/STM32_Programmer_CLI",
+    )
+
+    assert runner.context.avrdude_path == "/opt/avrdude"
+    assert runner.context.esptool_path == "/opt/esptool.py"
+    assert runner.context.openocd_path == "/opt/openocd"
+    assert runner.context.stm32cubeprogrammer_path == "/opt/STM32_Programmer_CLI"

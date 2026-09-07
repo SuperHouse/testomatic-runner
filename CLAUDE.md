@@ -21,19 +21,28 @@ Use those terms as defined there rather than looser language like "export."
   inside a Test Suite Package (see below), not as a stand-alone download — a future goal is this
   runner discovering and fetching Test Suite Definitions from a Register API instead.
 - **Test Suite Package** — a Test Suite Definition plus the additional artifacts it references
-  and needs to run (e.g. firmware binaries for `UPLOAD_FIRMWARE`). Register delivers this as a ZIP
-  archive (filename pattern `{sku}-hw{hw_version}-test-suite-v{version}.zip`, its contents all
-  inside one top-level folder of that same name, holding `test-suite-definition.json` plus any
-  referenced files — so extracting it can never scatter loose files into whatever directory it
-  lands in) — see `test-suite-package.md` for the format.
+  and needs to run (e.g. firmware binaries for an `UPLOAD_FIRMWARE_*` step). Register delivers
+  this as a ZIP archive (filename pattern `{sku}-hw{hw_version}-test-suite-v{version}.zip`, its
+  contents all inside one top-level folder of that same name, holding `test-suite-definition.json`
+  plus any referenced files — so extracting it can never scatter loose files into whatever
+  directory it lands in) — see `test-suite-package.md` for the format.
 
-## Ecosystem — three sibling repos, each with its own CLAUDE.md
+## Ecosystem — four sibling repos, each with its own CLAUDE.md
 
-This runner is one part of a three-repo system. Read the other two repos' `CLAUDE.md` files
-directly when working on anything that crosses a boundary — don't rely on summaries here going
-stale:
+This runner is one part of a four-repo system. Read the other repos' `CLAUDE.md` files directly
+when working on anything that crosses a boundary — don't rely on summaries here going stale:
 
 - **This repo (`testomatic-runner`)** — parses a Test Suite Package and executes its Test Steps.
+- **`testomatic-ui`** (`~/Dropbox/src/testomatic-ui`) — the on-device Django web UI, one instance
+  per physical Testomatic tester, and this repo's only real-world caller today: it imports
+  `testomatic` as an in-process library (`-e ../testomatic-runner` in its `requirements.txt`, not
+  a subprocess) from `test_suites.views._run_test_suite()`, which calls `suite.load_suite()` then
+  `runner.TestRunner(chassis, test_module, avrdude_path=..., ...).run(suite)`. The 4
+  `avrdude_path`/`esptool_path`/`openocd_path`/`stm32cubeprogrammer_path` keyword arguments (see
+  `steps/base.py`'s `ExecutionContext` below) come from that device's own `core.models
+  .DeviceSettings` singleton, edited at testomatic-ui's `/settings/` page — this repo defines the
+  extension point (the 4 constructor kwargs, defaulting to the bare tool name on `$PATH`), that
+  repo is what actually populates it per device.
 - **`testomatic-io`** (`~/Dropbox/src/testomatic-io`) — the Python hardware abstraction layer this
   runner drives the chassis through. Its `Chassis`/`TestModule` facade classes (`chassis.iomod`,
   `chassis.power`, `chassis.button`, `chassis.beeper`, etc.) map onto the GPIO/I2C wiring
@@ -71,21 +80,38 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   (`load_suite(path)` → `TestSuiteFile`); `path` may be a Test Suite Package `.zip` (its wrapped
   `test-suite-definition.json` is located by filename suffix, since it sits inside a top-level
   folder named after the package) or a bare Test Suite Definition JSON file directly — see
-  `test-suite-package.md` below for the format.
-- `testomatic/steps/` — one executor module per `step_type` (`delay.py`, `beep.py`,
-  `power.py`, `iomod.py`, `python_step.py`, `operator_intervention.py`, plus the deferred stubs
-  `firmware.py`/`led_spectral.py` — see `TEST_RUNNER_PLAN.md`'s "Deferred work"). Each executor is
-  a plain `(config, context) -> StepResult` function registered against its `step_type` string in
+  `test-suite-package.md` below for the format. For a `.zip`, `load_suite()` also extracts every
+  file in the package alongside it (`path.parent/<top-level-folder>/...`) and returns that folder
+  as `TestSuiteFile.package_dir` — the directory a step's own file references (e.g. an
+  `UPLOAD_FIRMWARE_*` step's `firmware_file`/`images`) resolve relative to; for a bare JSON file,
+  `package_dir` is just its own parent directory.
+- `testomatic/steps/` — one executor module per `step_type` (or closely-related group of
+  `step_type`s — `power.py` covers `CONTROL_POWER_RAIL`/`READ_RAIL_VOLTAGE`/`READ_RAIL_CURRENT`,
+  `firmware.py` covers the 4 `UPLOAD_FIRMWARE_*` types): `delay.py`, `beep.py`, `power.py`,
+  `iomod.py`, `python_step.py`, `operator_intervention.py`, `firmware.py`, plus the deferred stub
+  `led_spectral.py` — see `TEST_RUNNER_PLAN.md`'s "Deferred work". Each executor is a plain
+  `(config, context) -> StepResult` function registered against its `step_type` string in
   `registry.STEP_EXECUTORS` via `@register_step(...)` (`registry.py`) — dict-of-functions dispatch,
   not a class hierarchy, since (unlike `testomatic-io`'s IOMOD chip drivers) there's no runtime
-  probing involved: the `step_type` is already known from the parsed JSON.
-- `testomatic/runner.py` — `TestRunner.run(suite)` executes `test_steps` in order via the
-  registry, stops and turns off all three power rails immediately if an `abort_on_fail` step fails
-  (the one case where the runner touches rails on its own initiative — see `TEST_RUNNER_PLAN.md`),
-  and returns a `RunReport`; `format_report()` renders it plus the suite's `manual_checks`.
-- `testomatic/cli.py` / `__main__.py` — `python -m testomatic run <suite.zip|suite.json>`
+  probing involved: the `step_type` is already known from the parsed JSON. `firmware.py`'s 4
+  executors shell out to avrdude/esptool.py/openocd/STM32CubeProgrammer via `subprocess.run()`,
+  resolving firmware files from `context.package_dir` and each defaulting its own tool's
+  executable to the bare name on `$PATH` unless `context.avrdude_path`/`esptool_path`/
+  `openocd_path`/`stm32cubeprogrammer_path` overrides it (set via `TestRunner(...)`/`cli.py`'s
+  `--*-path` options) — see `TEST_RUNNER_PLAN.md`'s "`UPLOAD_FIRMWARE_*`" section for the
+  command-line mapping and what's still unverified on real hardware.
+- `testomatic/steps/base.py` — `ExecutionContext` (hardware handles, `package_dir`, and the 4
+  tool-path overrides above) and `StepResult`, shared by every executor.
+- `testomatic/runner.py` — `TestRunner.run(suite)` copies `suite.package_dir` onto
+  `self.context.package_dir`, then executes `test_steps` in order via the registry, stops and
+  turns off all three power rails immediately if an `abort_on_fail` step fails (the one case where
+  the runner touches rails on its own initiative — see `TEST_RUNNER_PLAN.md`), and returns a
+  `RunReport`; `format_report()` renders it plus the suite's `manual_checks`.
+- `testomatic/cli.py` / `__main__.py` — `python -m testomatic run <suite.zip|suite.json>
+  [--avrdude-path ...] [--esptool-path ...] [--openocd-path ...] [--stm32cubeprogrammer-path ...]`
   entry point; accepts either a Test Suite Package ZIP or a bare Test Suite Definition JSON file,
-  since it just forwards its argument to `suite.load_suite()`. Only importable/runnable on real
+  since it just forwards its argument to `suite.load_suite()`, and forwards the 4 optional
+  `--*-path` overrides straight through to `TestRunner(...)`. Only importable/runnable on real
   Raspberry Pi hardware (imports `testomatic_io` at call time) — confirmed working on a real
   chassis for `BEEP`/`READ_RAIL_VOLTAGE`; see `TEST_RUNNER_PLAN.md` for what's still unverified.
 - `tests/conftest.py` — `FakeChassis`/`FakePower`/`FakeBeeper`/`FakeIomod` doubles (as pytest
@@ -117,13 +143,15 @@ This is the key contract for any test-runner code added here. A Test Suite Defin
 object with four top-level keys: `design`, `test_suite`, `test_steps` (array, execution order),
 and `manual_checks` (array). Each `test_steps` entry has a fixed outer shape
 (`order`, `step_type`, `name`, `abort_on_fail`, `config_schema_version`, `config`) with a
-`step_type`-specific `config` payload. Known step types: `DELAY`, `UPLOAD_FIRMWARE`, `BEEP`,
-`READ_RAIL_VOLTAGE`, `READ_RAIL_CURRENT`, `CONTROL_POWER_RAIL`, `PYTHON`, `IOMOD_ANALOG_READ`,
-`IOMOD_DIGITAL_READ`, `IOMOD_DIGITAL_WRITE`, `IOMOD_ANALOG_WRITE`, `LED_SPECTRAL_READING`,
-`OPERATOR_INTERVENTION`. Optional `config` fields are omitted rather than null when unset — a
-consumer must apply its own default, not expect `null`/empty. `export_schema_version` versions
-the envelope shape; each step's `config_schema_version` independently versions that step type's
-own config shape — don't conflate the two when adding parsing logic.
+`step_type`-specific `config` payload. Known step types: `DELAY`, `UPLOAD_FIRMWARE_AVRDUDE`,
+`UPLOAD_FIRMWARE_ESPTOOL`, `UPLOAD_FIRMWARE_OPENOCD`, `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER`,
+`BEEP`, `READ_RAIL_VOLTAGE`, `READ_RAIL_CURRENT`, `CONTROL_POWER_RAIL`, `PYTHON`,
+`IOMOD_ANALOG_READ`, `IOMOD_DIGITAL_READ`, `IOMOD_DIGITAL_WRITE`, `IOMOD_ANALOG_WRITE`,
+`LED_SPECTRAL_READING`, `OPERATOR_INTERVENTION`. Optional `config` fields are omitted rather than
+null when unset — a consumer must apply its own default, not expect `null`/empty.
+`export_schema_version` versions the envelope shape; each step's `config_schema_version`
+independently versions that step type's own config shape — don't conflate the two when adding
+parsing logic.
 
 ## Hardware I/O reference
 

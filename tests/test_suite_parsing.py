@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 
@@ -41,6 +42,10 @@ def test_loads_sample_suite_fixture():
     assert len(suite.manual_checks) == 1
     assert suite.manual_checks[0].text == "Check me please"
 
+    # A bare Test Suite Definition JSON file (not inside a package) resolves relative to its own
+    # parent directory -- see suite.py's load_suite().
+    assert suite.package_dir == FIXTURE.parent
+
 
 def test_loads_sample_suite_from_zip_package():
     """load_suite() also accepts a Test Suite Package .zip directly, locating the wrapped
@@ -51,6 +56,35 @@ def test_loads_sample_suite_from_zip_package():
     assert suite.design.hw_version == "4.1"
     assert len(suite.test_steps) == 1
     assert suite.test_steps[0].step_type == "BEEP"
+    assert suite.package_dir == ZIP_FIXTURE.parent / "aqs-hw41-test-suite-v1"
+
+
+def test_loading_a_zip_package_extracts_referenced_files_alongside_it(tmp_path):
+    """A firmware step's executor (see steps/firmware.py) resolves firmware_file relative to
+    package_dir, so load_suite() must actually extract the package's other files to disk, not
+    just read the JSON out of the ZIP in memory."""
+    package = tmp_path / "abc-hw1-0-test-suite-v3.zip"
+    envelope = _envelope(
+        test_steps=[{
+            "order": 1, "step_type": "UPLOAD_FIRMWARE_AVRDUDE", "name": "Program", "abort_on_fail": True,
+            "config_schema_version": 1,
+            "config": {
+                "schema_version": 1, "port": "/dev/ttyUSB0", "programmer_type": "arduino",
+                "mcu": "atmega328p", "firmware_file": "main.hex",
+            },
+        }],
+    )
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("abc-hw1-0-test-suite-v3/test-suite-definition.json", json.dumps(envelope))
+        archive.writestr("abc-hw1-0-test-suite-v3/main.hex", ":00000001FF")
+
+    suite = load_suite(package)
+
+    assert suite.package_dir == tmp_path / "abc-hw1-0-test-suite-v3"
+    extracted_firmware = suite.package_dir / "main.hex"
+    assert extracted_firmware.is_file()
+    assert extracted_firmware.read_text() == ":00000001FF"
+    assert suite.test_steps[0].config["firmware_file"] == "main.hex"
 
 
 def test_rejects_zip_package_without_a_definition_file(tmp_path):

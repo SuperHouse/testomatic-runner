@@ -3,7 +3,7 @@
 A Test Suite is the ordered list of Test Steps and Manual Checks for a
 [Design](../user-guide/designs.md). You can download a Test Suite as a **Test Suite Package**: a
 ZIP archive containing the Test Suite Definition plus any other files it needs to run (for
-example, firmware binaries for `UPLOAD_FIRMWARE` steps). This page describes the package layout
+example, firmware binaries for a firmware-upload step). This page describes the package layout
 and the Test Suite Definition JSON format inside it. Use it to build external tools, such as a
 Testomatic tester, that read or write Test Suites.
 
@@ -27,9 +27,9 @@ before it moved inside a ZIP archive — only the extension changed, from `.json
 ## Package contents
 
 Everything in the archive sits inside one top-level folder, named the same as the archive itself
-(without the `.zip` extension). Extracting `abc123-hw1-0-test-suite-v3.zip` therefore always
-produces a single `abc123-hw1-0-test-suite-v3/` folder, never loose files dropped into whatever
-directory it was extracted into — the package stays self-contained regardless of how it's opened.
+(without the `.zip` extension). Extracting `abc123-hw1-0-test-suite-v3.zip` always produces a
+single `abc123-hw1-0-test-suite-v3/` folder. It never drops loose files into the directory it was
+extracted into. The package stays self-contained no matter how a tool opens it.
 
 At minimum, that folder contains one file:
 
@@ -43,9 +43,17 @@ Test Suite's steps and manual checks. Its format is described below, under
 [Test Suite Definition format](#test-suite-definition-format).
 
 A package may also contain other files that `test_steps` reference by filename — for example, a
-firmware binary named by an `UPLOAD_FIRMWARE` step's `firmware_file` field. These sit alongside
+firmware binary named by a firmware-upload step's `firmware_file` field (or, for
+`UPLOAD_FIRMWARE_ESPTOOL`, by a filename inside its `images` list). These sit alongside
 `test-suite-definition.json` in the same folder; a consumer resolves those filenames relative to
 it (see [Example](#example) below).
+
+These files come from binaries uploaded directly on the Test Step's own edit page (see
+[Test Suites](../user-guide/test-suites.md)), not typed in as plain text — the Register always
+bundles the exact bytes that were uploaded, so `firmware_file`/`images[].file` are guaranteed to
+resolve to a real file inside the package. Two different steps in the same Test Suite can never
+attach a file with the same name, so this flat, single-folder layout can never have one step's
+file silently overwrite another's.
 
 ## Test Suite Definition format
 
@@ -83,6 +91,7 @@ This object describes this version of the Test Suite:
 
 | Field | Type | Description |
 |---|---|---|
+| `id` | integer | The Test Suite Package's own database ID — a definitive identifier for this specific version, usable with the [Test Suites API](reference.md#test-suites) |
 | `version` | integer | Version number, starting at 1 |
 | `status` | string | `"DRAFT"` or `"SAVED"` |
 | `notes` | string or `null` | Free-text notes the user enters when saving this version |
@@ -117,11 +126,23 @@ alongside the Test Steps. Each item has no type or config fields of its own:
 | `order` | integer | Position within the list (ascending) |
 | `text` | string | The checklist item's text |
 
+## Executing a Test Suite
+
+A tester runs a Test Suite Package like this:
+
+1. Read `test_steps`, sorted by `order`.
+2. For each step, look at `step_type` and run the action listed for that type below.
+3. Read `config` for the fields that action needs. Apply your own default for an optional field
+   that `config` omits.
+4. If a step fails and its `abort_on_fail` is `true`, stop. Do not run the remaining steps.
+5. After the steps, work through `manual_checks` in order, and show each `text` value to the
+   operator.
+
 ## Test Step types
 
 Each step's `config` object holds only the fields for its `step_type`. The Register omits an
-**optional** field from `config` when it has no value. A consumer should apply its own default
-instead of expecting a null or empty value for that key.
+**optional** field from `config` when it has no value. Apply your own default instead of
+expecting a null or empty value for that key.
 
 ### `DELAY`
 
@@ -131,15 +152,56 @@ Waits a fixed number of milliseconds.
 |---|---|---|---|
 | `delay_ms` | integer | Yes | Delay in milliseconds |
 
-### `UPLOAD_FIRMWARE`
+### `UPLOAD_FIRMWARE_AVRDUDE`
 
-Uploads a firmware image to the device under test.
+There are 4 firmware upload step types, one per upload tool, since each tool connects to the
+device and takes its input differently.
+
+Uploads a firmware image using avrdude.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `upload_tool` | string | Yes | One of `avrdude`, `esptool.py`, `openocd`, `stm32cubeprogrammer` |
 | `port` | string | Yes | Serial port / device identifier |
-| `firmware_file` | string | Yes | Firmware binary filename, resolved relative to the Test Suite Package root |
+| `firmware_file` | string | No | Firmware binary filename, resolved relative to the Test Suite Package root. Absent until a file is attached on the step's edit page |
+| `programmer_type` | string | Yes | avrdude's `-c` programmer type, for example `arduino` |
+| `mcu` | string | Yes | Target MCU signature, for example `atmega328p` |
+| `baud_rate` | integer | No | Upload baud rate |
+
+### `UPLOAD_FIRMWARE_ESPTOOL`
+
+Uploads one or more firmware images using esptool.py. Unlike the other 3 upload tools, this step
+can flash several binaries in one run, each at its own flash address.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `port` | string | Yes | Serial port / device identifier |
+| `chip` | string | Yes | Target chip, for example `esp32` |
+| `images` | array of objects | No | One or more binaries to flash, in order. Each object has `address` (string, hex flash address, for example `"0x1000"`) and `file` (string, filename resolved relative to the Test Suite Package root). Absent until at least one image is attached on the step's edit page |
+| `baud_rate` | integer | No | Upload baud rate |
+
+### `UPLOAD_FIRMWARE_OPENOCD`
+
+Uploads a firmware image using OpenOCD. Unlike avrdude and esptool.py, OpenOCD does not connect
+through a serial port — it selects the debug probe and target through config files.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interface_config` | string | Yes | OpenOCD interface config file, for example `interface/stlink.cfg` |
+| `target_config` | string | Yes | OpenOCD target config file, for example `target/stm32f4x.cfg` |
+| `firmware_file` | string | No | Firmware binary filename, resolved relative to the Test Suite Package root. Absent until a file is attached on the step's edit page |
+| `adapter_serial` | string | No | Serial number of one specific debug adapter, when more than one is attached |
+| `flash_address` | string | No | Hex address to start flashing at, for example `"0x08000000"` |
+
+### `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER`
+
+Uploads a firmware image using STM32CubeProgrammer.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `connection_interface` | string | Yes | One of `SWD`, `JTAG`, `UART`, `USB_DFU` |
+| `firmware_file` | string | No | Firmware binary filename, resolved relative to the Test Suite Package root. Absent until a file is attached on the step's edit page |
+| `port` | string | No | Debug probe or port identifier. Leave absent to auto-detect |
+| `flash_address` | string | No | Hex address to start flashing at, for example `"0x08000000"` |
 
 ### `BEEP`
 
@@ -256,7 +318,7 @@ types, it does not take an automated reading.
 
 ## Example
 
-A Test Suite Package for a board with an `UPLOAD_FIRMWARE` step unzips to:
+A Test Suite Package for a board with an `UPLOAD_FIRMWARE_AVRDUDE` step unzips to:
 
 ```
 abc123-hw1-0-test-suite-v3.zip
@@ -277,6 +339,7 @@ abc123-hw1-0-test-suite-v3.zip
     "hw_version": "1.0"
   },
   "test_suite": {
+    "id": 7,
     "version": 3,
     "status": "SAVED",
     "notes": "Added LED spectral check",
@@ -293,15 +356,16 @@ abc123-hw1-0-test-suite-v3.zip
     },
     {
       "order": 2,
-      "step_type": "UPLOAD_FIRMWARE",
+      "step_type": "UPLOAD_FIRMWARE_AVRDUDE",
       "name": "Program microcontroller",
       "abort_on_fail": true,
       "config_schema_version": 1,
       "config": {
         "schema_version": 1,
-        "upload_tool": "avrdude",
         "port": "/dev/ttyUSB0",
-        "firmware_file": "main.hex"
+        "firmware_file": "main.hex",
+        "programmer_type": "arduino",
+        "mcu": "atmega328p"
       }
     },
     {

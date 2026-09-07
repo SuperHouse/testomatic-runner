@@ -1,10 +1,12 @@
 # Test Runner — Implementation Plan
 
-Status: Phases 1, 2 and 4 implemented and unit-tested (against fake hardware, see Testing below).
-Phase 3's code is written and unit-tested the same way; `cli.py` has now been run against a real
-chassis and confirmed working for `BEEP` and `READ_RAIL_VOLTAGE`, but the rest of Phase 3
+Status: Phases 1, 2, 4 and 5 implemented and unit-tested (against fake hardware, see Testing
+below). Phase 3's code is written and unit-tested the same way; `cli.py` has now been run against
+a real chassis and confirmed working for `BEEP` and `READ_RAIL_VOLTAGE`, but the rest of Phase 3
 (`CONTROL_POWER_RAIL`, `READ_RAIL_CURRENT`, both `IOMOD_*` step types) is **still unverified on
-real hardware**. Phases 5/6 remain deferred stubs. Staged implementation — check off phases as
+real hardware** — and so is all of Phase 5 (`UPLOAD_FIRMWARE_*`): the tool command lines are a
+first-pass best effort against each tool's own documented CLI, not yet run against a real
+programmer/DUT. Phase 6 remains a deferred stub. Staged implementation — check off phases as
 they land.
 
 ## Scope for v1
@@ -13,18 +15,22 @@ Parse a Test Suite Definition (the `test-suite-definition.json` inside a Test Su
 format documented in [test-suite-package.md](test-suite-package.md)) and execute its `test_steps`
 in order against real hardware via `testomatic-io` (`~/Dropbox/src/testomatic-io`), respecting
 `abort_on_fail`, and print a pass/fail report. `manual_checks` are surfaced to the operator, not
-executed. Firmware upload and the colour-sensor step are stubbed for now (see below) —
-everything else maps cleanly onto `testomatic-io`'s existing API.
+executed. The colour-sensor step is stubbed for now (see below) — everything else, including
+firmware upload as of Phase 5, maps onto either `testomatic-io`'s existing API or a subprocess
+call to an external upload tool.
 
 `suite.py`'s `load_suite()` accepts either a Test Suite Package `.zip` or a bare Test Suite
 Definition JSON file — dispatched on the path's extension. For a `.zip`, it locates
 `test-suite-definition.json` by filename suffix (it sits inside a top-level folder named after the
 package, not at the archive root — see `test-suite-package.md`) rather than assuming a fixed path,
-so it doesn't care whether the wrapping folder name matches the archive's own name. `cli.py`'s
-`run` command accepts either form the same way, since it just forwards its argument to
-`load_suite()`. **Still not handled**: resolving other files a step might reference from inside
-the package (e.g. `UPLOAD_FIRMWARE`'s `firmware_file`) — that's tied up with the deferred
-`UPLOAD_FIRMWARE` work below, not with loading the suite itself.
+so it doesn't care whether the wrapping folder name matches the archive's own name; it then
+extracts the whole archive alongside the ZIP (`path.parent/<top-level-folder>/...`, re-extracted
+on every load so it stays in sync if the same path is loaded again after the underlying package
+changes) and returns that folder as `TestSuiteFile.package_dir`. `cli.py`'s `run` command accepts
+either form the same way, since it just forwards its argument to `load_suite()`. `package_dir` is
+what `TestRunner.run()` copies onto `ExecutionContext.package_dir` before executing any steps —
+see Phase 5 below for how the `UPLOAD_FIRMWARE_*` executors resolve `firmware_file`/`images` from
+it.
 
 ## Package layout
 
@@ -41,7 +47,7 @@ testomatic-runner/
       base.py             # StepResult + ExecutionContext dataclasses — done
       registry.py          # STEP_EXECUTORS: dict[str, StepExecutor] + @register_step — done
       delay.py, beep.py, power.py, iomod.py, python_step.py, operator_intervention.py  # done
-      firmware.py           # stub for now — see Deferred work below — done
+      firmware.py           # 4 UPLOAD_FIRMWARE_* executors, one per tool — done, unverified on real hardware
       led_spectral.py       # stub for now — see Deferred work below — done
     runner.py              # TestRunner: iterate steps, call executor, honour abort_on_fail, build report — done
     cli.py                 # entry point, `python -m testomatic run suite.zip|suite.json` — done,
@@ -76,7 +82,10 @@ module.
 | `IOMOD_ANALOG_READ` / `_WRITE` | `chassis.iomod.analog_read/write(iomod, pin, ...)` |
 | `OPERATOR_INTERVENTION` | print `message`, block on operator confirmation (CLI `input()` for v1) |
 | `PYTHON` | `exec()` the code string with `chassis`/`test_module` bound in its namespace |
-| `UPLOAD_FIRMWARE` | stub for now — prints `"Firmware upload"` and returns a pass. See Deferred work below |
+| `UPLOAD_FIRMWARE_AVRDUDE` | `subprocess.run(["avrdude", "-c", programmer_type, "-p", mcu, "-P", port, ..., "-U", f"flash:w:{firmware_file}:i"])` |
+| `UPLOAD_FIRMWARE_ESPTOOL` | `subprocess.run(["esptool.py", "--chip", chip, "--port", port, ..., "write_flash", addr1, file1, addr2, file2, ...])` |
+| `UPLOAD_FIRMWARE_OPENOCD` | `subprocess.run(["openocd", "-f", interface_config, "-f", target_config, ..., "-c", f"program {firmware_file} ... verify reset exit"])` |
+| `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER` | `subprocess.run(["STM32_Programmer_CLI", "-c", f"port={connection_interface} ...", "-w", firmware_file, ..., "-v", "-rst"])` |
 | `LED_SPECTRAL_READING` | stub for now — prints `"LED test"` and returns a pass. See Deferred work below |
 
 ### BEEP timing
@@ -113,13 +122,38 @@ part of normal step execution, so it belongs in `runner.py`'s abort-on-fail hand
    with how it wraps INA260/EEPROM via `i2c_probe.py`) or directly in this executor — not decided
    yet. **For now**, `steps/led_spectral.py` is a stub that just prints `"LED test"` and returns a
    pass `StepResult`, so suites containing this step type can still run end-to-end.
-2. **`UPLOAD_FIRMWARE`** — the JSON only carries a `firmware_file` name, not the binary itself.
-   Register doesn't currently attach firmware bytes to a Test Suite export (only a `DesignAsset`
-   of type `FIRMWARE` on the Design, separately), and the design for associating firmware files
-   with Test Suites more generally isn't settled. This is a moderately complex piece of work on
-   its own (tool dispatch, port selection, file resolution) and is deferred. **For now**,
-   `steps/firmware.py` is a stub that just prints `"Firmware upload"` and returns a pass
-   `StepResult`.
+
+## `UPLOAD_FIRMWARE_*` (Phase 5 — implemented, unverified on real hardware)
+
+Register split the single `UPLOAD_FIRMWARE` step type into four tool-specific ones
+(`UPLOAD_FIRMWARE_AVRDUDE`/`_ESPTOOL`/`_OPENOCD`/`_STM32CUBEPROGRAMMER`) and now attaches the
+actual firmware bytes to the step (`TestStepAsset`, bundled into the Test Suite Package — see
+test-suite-package.md), which unblocked the two things that kept this deferred before: file
+association and tool dispatch. `steps/firmware.py` now has one executor per tool, each shelling
+out via `subprocess.run()` — see the step type → command mapping above.
+
+- **File resolution**: `firmware_file`/`images[].file` are resolved against
+  `context.package_dir`, which `TestRunner.run()` copies from `suite.package_dir` at the start of
+  every run — see `suite.py`'s `load_suite()`/`_extract_package()` above. A step whose file is
+  missing (not yet attached in Register, or missing from the package) fails cleanly with a
+  message naming the problem, rather than crashing.
+- **Tool executable paths** are configurable per `ExecutionContext`
+  (`avrdude_path`/`esptool_path`/`openocd_path`/`stm32cubeprogrammer_path`), set via
+  `TestRunner(...)`'s matching keyword arguments (also exposed as `cli.py`'s `--avrdude-path`
+  etc.) and defaulting to the bare tool name on `$PATH` when unset. This is the extension point a
+  caller uses to point at a tool that isn't on `$PATH` — the natural next step is a per-device
+  settings page in testomatic-ui that sets these when it constructs its own `TestRunner`.
+- **Serial port / debug-probe identification** (avrdude's/esptool's `port`, OpenOCD's
+  `adapter_serial`, STM32CubeProgrammer's `port`) stays entirely suite-side — read straight out
+  of `config`, exactly as Register defines it, with no tester-side override or mapping layer.
+  Whether it should instead (or additionally) be tester-side config is an open question, tracked
+  as Register issue #122 (see that repo's own memory/notes) — **deliberately deferred**: the plan
+  is to exercise the system end-to-end using this simpler suite-side-only approach first, and
+  revisit #122 only if that turns out not to be enough in practice.
+- **Command lines are unverified.** Each tool's flags were built from its own documented CLI, not
+  confirmed against a real chassis/programmer yet — treat the mapping above as a first pass to be
+  corrected once real hardware is available (same caveat `power.py`/`iomod.py` still carry for
+  their own unverified step types).
 
 ## Runner semantics
 
@@ -182,6 +216,8 @@ extracted `aqs-hw41-test-suite-v1/test-suite-definition.json` and the packaged
 - [x] **Phase 4** — `runner.py` orchestration + abort-on-fail/report logic, including the all-rails-off
       safety behaviour on abort-on-fail — implemented and unit-tested, and `BEEP`/`READ_RAIL_VOLTAGE`
       have now run successfully end-to-end via `cli.py` on a real chassis.
-- [ ] **Phase 5** — `UPLOAD_FIRMWARE`, once the firmware-source question above is settled.
+- [x] **Phase 5** — `UPLOAD_FIRMWARE_AVRDUDE`/`_ESPTOOL`/`_OPENOCD`/`_STM32CUBEPROGRAMMER`
+      implemented and unit-tested against a mocked `subprocess.run()`; **still unverified against
+      real hardware/tools** — see "`UPLOAD_FIRMWARE_*`" above.
 - [ ] **Phase 6** — `LED_SPECTRAL_READING`, once the existing sensor driver is wired in (either via
       a `testomatic-io` `chassis.colour_sensor` subsystem or directly in this executor).

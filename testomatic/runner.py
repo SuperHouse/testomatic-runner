@@ -25,10 +25,27 @@ class RunReport:
 
 
 class TestRunner:
-    def __init__(self, chassis, test_module=None):
-        self.context = ExecutionContext(chassis=chassis, test_module=test_module)
+    def __init__(
+        self,
+        chassis,
+        test_module=None,
+        *,
+        avrdude_path: str | None = None,
+        esptool_path: str | None = None,
+        openocd_path: str | None = None,
+        stm32cubeprogrammer_path: str | None = None,
+    ):
+        self.context = ExecutionContext(
+            chassis=chassis,
+            test_module=test_module,
+            avrdude_path=avrdude_path,
+            esptool_path=esptool_path,
+            openocd_path=openocd_path,
+            stm32cubeprogrammer_path=stm32cubeprogrammer_path,
+        )
 
     def run(self, suite: TestSuiteFile) -> RunReport:
+        self.context.package_dir = suite.package_dir
         report = RunReport()
 
         for step in suite.test_steps:
