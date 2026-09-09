@@ -103,7 +103,7 @@ def execute_esptool(config: dict, context: ExecutionContext) -> StepResult:
     ]
     if config.get("baud_rate"):
         command += ["--baud", str(config["baud_rate"])]
-    command += ["write_flash", *flash_args]
+    command += ["write-flash", *flash_args]
 
     return _run_tool(command, "esptool.py")
 
