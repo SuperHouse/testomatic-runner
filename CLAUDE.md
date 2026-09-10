@@ -37,12 +37,16 @@ when working on anything that crosses a boundary — don't rely on summaries her
   per physical Testomatic tester, and this repo's only real-world caller today: it imports
   `testomatic` as an in-process library (`-e ../testomatic-runner` in its `requirements.txt`, not
   a subprocess) from `test_suites.views._run_test_suite()`, which calls `suite.load_suite()` then
-  `runner.TestRunner(chassis, test_module, avrdude_path=..., ...).run(suite)`. The 4
-  `avrdude_path`/`esptool_path`/`openocd_path`/`stm32cubeprogrammer_path` keyword arguments (see
-  `steps/base.py`'s `ExecutionContext` below) come from that device's own `core.models
-  .DeviceSettings` singleton, edited at testomatic-ui's `/settings/` page — this repo defines the
-  extension point (the 4 constructor kwargs, defaulting to the bare tool name on `$PATH`), that
-  repo is what actually populates it per device.
+  `runner.TestRunner(chassis, test_module, avrdude_path=..., ...).run(suite)`. This repo defines
+  4 constructor kwargs (`avrdude_path`/`esptool_path`/`openocd_path`/`stm32cubeprogrammer_path` —
+  see `steps/base.py`'s `ExecutionContext` below) as the extension point for overriding each
+  `UPLOAD_FIRMWARE_*` tool's location, each defaulting to the bare tool name on `$PATH`.
+  testomatic-ui's `core.models.DeviceSettings` singleton (edited at its `/settings/` page)
+  populates only 3 of these (`avrdude_path`/`openocd_path`/`stm32cubeprogrammer_path`) per
+  device — it deliberately has no `esptool_path` setting, since `esptool` is on PyPI and this
+  repo's `pi` extra installs it directly onto `$PATH`, unlike the other three tools, which have
+  no PyPI distribution and still need a device-side override for a non-standard install
+  location.
 - **`testomatic-io`** (`~/Dropbox/src/testomatic-io`) — the Python hardware abstraction layer this
   runner drives the chassis through. Its `Chassis`/`TestModule` facade classes (`chassis.iomod`,
   `chassis.power`, `chassis.button`, `chassis.beeper`, etc.) map onto the GPIO/I2C wiring

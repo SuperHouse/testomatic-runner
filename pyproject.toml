@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "testomatic-runner"
-version = "0.1.0"
+version = "0.2.0"
 description = "Test runner that executes a Testomatic Test Suite Package against real hardware via testomatic-io."
 readme = "README.md"
 authors = [
@@ -33,7 +33,11 @@ dev = ["pytest"]
 # -e ".[dev]"` keeps working on a Mac dev machine. Install this extra on the Raspberry Pi itself.
 # >=0.1.1 (not yet published, see testomatic-io's own pyproject.toml) because 0.1.0 fails a fresh
 # install on current Raspberry Pi OS -- see testomatic-io's BLINKA_REMOVAL_PLAN.md "Motivation".
-pi = ["testomatic-io>=0.1.1"]
+# esptool is a pure-Python PyPI package (unlike avrdude/openocd/STM32CubeProgrammer, which are
+# native tools with no PyPI distribution) and registers an `esptool.py` console script on
+# install, so this makes UPLOAD_FIRMWARE_ESPTOOL's default `esptool_path` (see steps/firmware.py)
+# resolve without the caller needing to set --esptool-path/context.esptool_path themselves.
+pi = ["testomatic-io>=0.1.1", "esptool"]
 
 [project.urls]
 Homepage = "https://github.com/SuperHouse/testomatic-runner"
