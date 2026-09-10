@@ -41,22 +41,37 @@ def _resolve_file(context: ExecutionContext, filename: str) -> tuple[Path | None
     return path, None
 
 
-def _run_tool(command: list[str], tool_label: str) -> StepResult:
-    """Runs a tool's command line, turning its exit code and output into a StepResult."""
+def _run_tool(command: list[str], tool_label: str, context: ExecutionContext) -> StepResult:
+    """Runs a tool's command line, turning its exit code and output into a StepResult.
+
+    Output is always captured in full into the result's `measured["output"]` (for callers such
+    as testomatic-ui to store/display later), and when `context.verbose` is set it's also
+    streamed to stdout line-by-line as the tool runs, rather than only appearing once the tool
+    exits — useful for a long-running avrdude/esptool/openocd/STM32CubeProgrammer invocation.
+    """
     try:
-        result = subprocess.run(command, capture_output=True, text=True)
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
     except FileNotFoundError as exc:
         return StepResult(passed=False, message=f"{tool_label} not found: {exc}")
 
-    output = (result.stdout + result.stderr).strip()
+    lines = []
+    for line in process.stdout:
+        lines.append(line)
+        if context.verbose:
+            print(line, end="")
+    process.wait()
+
+    output = "".join(lines).strip()
     last_line = output.splitlines()[-1] if output else ""
     suffix = f": {last_line}" if last_line else ""
 
-    if result.returncode == 0:
+    if process.returncode == 0:
         return StepResult(passed=True, message=f"{tool_label} succeeded{suffix}", measured={"output": output})
     return StepResult(
         passed=False,
-        message=f"{tool_label} exited {result.returncode}{suffix}",
+        message=f"{tool_label} exited {process.returncode}{suffix}",
         measured={"output": output},
     )
 
@@ -80,7 +95,7 @@ def execute_avrdude(config: dict, context: ExecutionContext) -> StepResult:
         command += ["-b", str(config["baud_rate"])]
     command += ["-U", f"flash:w:{path}:i"]
 
-    return _run_tool(command, "avrdude")
+    return _run_tool(command, "avrdude", context)
 
 
 @register_step("UPLOAD_FIRMWARE_ESPTOOL")
@@ -105,7 +120,7 @@ def execute_esptool(config: dict, context: ExecutionContext) -> StepResult:
         command += ["--baud", str(config["baud_rate"])]
     command += ["write-flash", *flash_args]
 
-    return _run_tool(command, "esptool.py")
+    return _run_tool(command, "esptool.py", context)
 
 
 @register_step("UPLOAD_FIRMWARE_OPENOCD")
@@ -131,7 +146,7 @@ def execute_openocd(config: dict, context: ExecutionContext) -> StepResult:
     program_command += " verify reset exit"
     command += ["-c", program_command]
 
-    return _run_tool(command, "openocd")
+    return _run_tool(command, "openocd", context)
 
 
 @register_step("UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER")
@@ -156,4 +171,4 @@ def execute_stm32cubeprogrammer(config: dict, context: ExecutionContext) -> Step
         command.append(config["flash_address"])
     command += ["-v", "-rst"]
 
-    return _run_tool(command, "STM32CubeProgrammer")
+    return _run_tool(command, "STM32CubeProgrammer", context)

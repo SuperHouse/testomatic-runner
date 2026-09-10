@@ -29,6 +29,11 @@ class ExecutionContext:
     settings page for this); it's deliberately separate from the serial port/debug-probe fields,
     which stay suite-side (`config["port"]` etc., as defined by Register) — see the open question
     tracked as Register issue #122, not resolved here.
+
+    `verbose` (set via `TestRunner(...)`/`cli.py`'s `--verbose` flag) asks executors that shell
+    out or run arbitrary code (firmware.py, python_step.py) to stream their subprocess/stdout
+    output live to the console as it happens, in addition to always capturing it into
+    `StepResult.measured["output"]` regardless of this flag.
     """
 
     chassis: Any
@@ -38,3 +43,4 @@ class ExecutionContext:
     esptool_path: str | None = None
     openocd_path: str | None = None
     stm32cubeprogrammer_path: str | None = None
+    verbose: bool = False

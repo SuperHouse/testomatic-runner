@@ -9,8 +9,29 @@ process. A raised exception is treated as a failed step rather than crashing the
 
 from __future__ import annotations
 
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+
 from .base import ExecutionContext, StepResult
 from .registry import register_step
+
+
+class _Tee(StringIO):
+    """A StringIO that also writes through to a real stream, for live console output.
+
+    `exec()` runs synchronously, so writing straight through to `stream` as each print() call
+    happens is already "live" in the same sense as firmware.py's subprocess streaming — there's
+    no separate process to interleave with.
+    """
+
+    def __init__(self, stream):
+        super().__init__()
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        self._stream.write(text)
+        return super().write(text)
 
 
 @register_step("PYTHON")
@@ -18,9 +39,15 @@ def execute(config: dict, context: ExecutionContext) -> StepResult:
     python_code = config["python_code"]
     namespace = {"chassis": context.chassis, "test_module": context.test_module}
 
-    try:
-        exec(python_code, namespace)  # noqa: S102 -- deliberate, see module docstring
-    except Exception as exc:
-        return StepResult(passed=False, message=f"Python step raised: {exc}")
+    stdout = _Tee(sys.stdout) if context.verbose else StringIO()
+    stderr = _Tee(sys.stderr) if context.verbose else StringIO()
 
-    return StepResult(passed=True, message="Python step executed")
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exec(python_code, namespace)  # noqa: S102 -- deliberate, see module docstring
+    except Exception as exc:
+        output = (stdout.getvalue() + stderr.getvalue()).strip()
+        return StepResult(passed=False, message=f"Python step raised: {exc}", measured={"output": output})
+
+    output = (stdout.getvalue() + stderr.getvalue()).strip()
+    return StepResult(passed=True, message="Python step executed", measured={"output": output})

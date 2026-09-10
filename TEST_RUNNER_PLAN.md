@@ -82,10 +82,10 @@ module.
 | `IOMOD_ANALOG_READ` / `_WRITE` | `chassis.iomod.analog_read/write(iomod, pin, ...)` |
 | `OPERATOR_INTERVENTION` | print `message`, block on operator confirmation (CLI `input()` for v1) |
 | `PYTHON` | `exec()` the code string with `chassis`/`test_module` bound in its namespace |
-| `UPLOAD_FIRMWARE_AVRDUDE` | `subprocess.run(["avrdude", "-c", programmer_type, "-p", mcu, "-P", port, ..., "-U", f"flash:w:{firmware_file}:i"])` |
-| `UPLOAD_FIRMWARE_ESPTOOL` | `subprocess.run(["esptool.py", "--chip", chip, "--port", port, ..., "write_flash", addr1, file1, addr2, file2, ...])` |
-| `UPLOAD_FIRMWARE_OPENOCD` | `subprocess.run(["openocd", "-f", interface_config, "-f", target_config, ..., "-c", f"program {firmware_file} ... verify reset exit"])` |
-| `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER` | `subprocess.run(["STM32_Programmer_CLI", "-c", f"port={connection_interface} ...", "-w", firmware_file, ..., "-v", "-rst"])` |
+| `UPLOAD_FIRMWARE_AVRDUDE` | `subprocess.Popen(["avrdude", "-c", programmer_type, "-p", mcu, "-P", port, ..., "-U", f"flash:w:{firmware_file}:i"])` |
+| `UPLOAD_FIRMWARE_ESPTOOL` | `subprocess.Popen(["esptool.py", "--chip", chip, "--port", port, ..., "write-flash", addr1, file1, addr2, file2, ...])` |
+| `UPLOAD_FIRMWARE_OPENOCD` | `subprocess.Popen(["openocd", "-f", interface_config, "-f", target_config, ..., "-c", f"program {firmware_file} ... verify reset exit"])` |
+| `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER` | `subprocess.Popen(["STM32_Programmer_CLI", "-c", f"port={connection_interface} ...", "-w", firmware_file, ..., "-v", "-rst"])` |
 | `LED_SPECTRAL_READING` | stub for now — prints `"LED test"` and returns a pass. See Deferred work below |
 
 ### BEEP timing
@@ -130,7 +130,7 @@ Register split the single `UPLOAD_FIRMWARE` step type into four tool-specific on
 actual firmware bytes to the step (`TestStepAsset`, bundled into the Test Suite Package — see
 test-suite-package.md), which unblocked the two things that kept this deferred before: file
 association and tool dispatch. `steps/firmware.py` now has one executor per tool, each shelling
-out via `subprocess.run()` — see the step type → command mapping above.
+out via `subprocess.Popen()` — see the step type → command mapping above.
 
 - **File resolution**: `firmware_file`/`images[].file` are resolved against
   `context.package_dir`, which `TestRunner.run()` copies from `suite.package_dir` at the start of
@@ -154,6 +154,16 @@ out via `subprocess.run()` — see the step type → command mapping above.
   confirmed against a real chassis/programmer yet — treat the mapping above as a first pass to be
   corrected once real hardware is available (same caveat `power.py`/`iomod.py` still carry for
   their own unverified step types).
+- **Verbose output** — Register issue #1 (this project's tracker). Each firmware executor's tool
+  output is always captured in full into `StepResult.measured["output"]` (regardless of
+  `context.verbose`), so a caller like testomatic-ui getting a `RunReport` back in-process (see
+  `run()` in `testomatic-ui`'s `test_suites.views._run_test_suite()`) already has it available for
+  its own storage/display, no separate API needed. `context.verbose` (set via `TestRunner(...)`'s
+  `verbose=` kwarg / `cli.py`'s `--verbose` flag) additionally streams that same output to stdout
+  live as the tool runs (`subprocess.Popen` read line-by-line, not `subprocess.run`, so output is
+  available before the process exits) and includes it in `format_report()`'s final text. The
+  `PYTHON` step follows the same convention — `exec()`'s stdout/stderr are always captured into
+  `measured["output"]`, and echoed live to the console only when `context.verbose` is set.
 
 ## Runner semantics
 
@@ -217,7 +227,8 @@ extracted `aqs-hw41-test-suite-v1/test-suite-definition.json` and the packaged
       safety behaviour on abort-on-fail — implemented and unit-tested, and `BEEP`/`READ_RAIL_VOLTAGE`
       have now run successfully end-to-end via `cli.py` on a real chassis.
 - [x] **Phase 5** — `UPLOAD_FIRMWARE_AVRDUDE`/`_ESPTOOL`/`_OPENOCD`/`_STM32CUBEPROGRAMMER`
-      implemented and unit-tested against a mocked `subprocess.run()`; **still unverified against
-      real hardware/tools** — see "`UPLOAD_FIRMWARE_*`" above.
+      implemented and unit-tested against a mocked `subprocess.Popen()`, including live/verbose
+      output streaming (issue #1); **still unverified against real hardware/tools** — see
+      "`UPLOAD_FIRMWARE_*`" above.
 - [ ] **Phase 6** — `LED_SPECTRAL_READING`, once the existing sensor driver is wired in (either via
       a `testomatic-io` `chassis.colour_sensor` subsystem or directly in this executor).

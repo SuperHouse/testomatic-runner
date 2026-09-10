@@ -34,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
         "--stm32cubeprogrammer-path",
         help="Override the STM32_Programmer_CLI executable (default: 'STM32_Programmer_CLI' on $PATH)",
     )
+    run_parser.add_argument(
+        "--verbose", action="store_true",
+        help="Stream firmware-tool/Python-step output live as steps run, and include it in the final report",
+    )
 
     args = parser.parse_args(argv)
 
@@ -44,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             esptool_path=args.esptool_path,
             openocd_path=args.openocd_path,
             stm32cubeprogrammer_path=args.stm32cubeprogrammer_path,
+            verbose=args.verbose,
         )
 
     return 1
@@ -56,6 +61,7 @@ def _run(
     esptool_path: str | None = None,
     openocd_path: str | None = None,
     stm32cubeprogrammer_path: str | None = None,
+    verbose: bool = False,
 ) -> int:
     from testomatic_io import Chassis, TestModule  # imported here: only importable on real hardware
 
@@ -73,9 +79,10 @@ def _run(
         esptool_path=esptool_path,
         openocd_path=openocd_path,
         stm32cubeprogrammer_path=stm32cubeprogrammer_path,
+        verbose=verbose,
     )
     report = runner.run(suite)
 
-    print(format_report(report, suite.manual_checks))
+    print(format_report(report, suite.manual_checks, verbose=verbose))
 
     return 0 if report.passed else 1

@@ -34,6 +34,7 @@ class TestRunner:
         esptool_path: str | None = None,
         openocd_path: str | None = None,
         stm32cubeprogrammer_path: str | None = None,
+        verbose: bool = False,
     ):
         self.context = ExecutionContext(
             chassis=chassis,
@@ -42,6 +43,7 @@ class TestRunner:
             esptool_path=esptool_path,
             openocd_path=openocd_path,
             stm32cubeprogrammer_path=stm32cubeprogrammer_path,
+            verbose=verbose,
         )
 
     def run(self, suite: TestSuiteFile) -> RunReport:
@@ -80,12 +82,18 @@ class TestRunner:
         power.rail_12v(False)
 
 
-def format_report(report: RunReport, manual_checks: list[ManualCheck]) -> str:
+def format_report(report: RunReport, manual_checks: list[ManualCheck], verbose: bool = False) -> str:
     lines = []
 
     for outcome in report.outcomes:
         status = "PASS" if outcome.result.passed else "FAIL"
         lines.append(f"[{status}] {outcome.step.name}: {outcome.result.message}")
+
+        output = outcome.result.measured.get("output") if verbose else None
+        if output:
+            lines.append("    --- output ---")
+            lines.extend(f"    {line}" for line in output.splitlines())
+            lines.append("    --------------")
 
     if report.aborted:
         lines.append("ABORTED: abort-on-fail step failed, all power rails turned off")

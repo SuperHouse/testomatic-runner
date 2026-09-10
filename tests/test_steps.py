@@ -17,22 +17,28 @@ from testomatic.steps import (
 )
 
 
-class _FakeCompletedProcess:
-    def __init__(self, returncode=0, stdout="", stderr=""):
+class _FakePopen:
+    """A subprocess.Popen stand-in: `stdout` is an iterable of lines (as the real Popen's stdout
+    is when iterated), and `wait()` just returns the pre-set `returncode` already set by the
+    time the caller's read-loop finishes."""
+
+    def __init__(self, returncode=0, output_lines=None):
         self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+        self.stdout = iter(output_lines or [])
+
+    def wait(self):
+        return self.returncode
 
 
-def _capturing_run(captured):
-    """A subprocess.run() replacement that records the command it was called with (into
-    `captured["command"]`) and always reports success."""
+def _capturing_popen(captured, returncode=0, output_lines=None):
+    """A subprocess.Popen() replacement that records the command it was called with (into
+    `captured["command"]`) and returns a `_FakePopen` reporting `returncode`/`output_lines`."""
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         captured["command"] = command
-        return _FakeCompletedProcess()
+        return _FakePopen(returncode=returncode, output_lines=output_lines)
 
-    return fake_run
+    return fake_popen
 
 
 def test_delay_sleeps_for_delay_ms(monkeypatch, context):
@@ -92,6 +98,24 @@ def test_python_step_reports_failure_on_exception(context):
 
     assert not result.passed
     assert "boom" in result.message
+
+
+def test_python_step_captures_print_output_without_echoing_to_console(context, capsys):
+    result = python_step.execute({"python_code": "print('reading sensor')"}, context)
+
+    assert result.passed
+    assert result.measured["output"] == "reading sensor"
+    assert capsys.readouterr().out == ""
+
+
+def test_python_step_streams_print_output_live_when_verbose(context, capsys):
+    context.verbose = True
+
+    result = python_step.execute({"python_code": "print('reading sensor')"}, context)
+
+    assert result.passed
+    assert result.measured["output"] == "reading sensor"
+    assert "reading sensor" in capsys.readouterr().out
 
 
 def test_control_power_rail_turns_rail_on(context):
@@ -185,12 +209,9 @@ def test_avrdude_builds_command_and_reports_success(monkeypatch, context, tmp_pa
     context.package_dir = tmp_path
 
     captured = {}
-
-    def fake_run(command, **kwargs):
-        captured["command"] = command
-        return _FakeCompletedProcess(returncode=0, stdout="avrdude done")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        subprocess, "Popen", _capturing_popen(captured, output_lines=["avrdude done\n"])
+    )
 
     result = firmware.execute_avrdude(
         {
@@ -211,13 +232,53 @@ def test_avrdude_builds_command_and_reports_success(monkeypatch, context, tmp_pa
     ]
 
 
+def test_avrdude_streams_output_live_when_verbose(monkeypatch, context, tmp_path, capsys):
+    (tmp_path / "main.hex").write_text(":00000001FF")
+    context.package_dir = tmp_path
+    context.verbose = True
+
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        _capturing_popen({}, output_lines=["avrdude: writing flash\n", "avrdude done\n"]),
+    )
+
+    result = firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
+        context,
+    )
+
+    assert result.passed
+    assert result.measured["output"] == "avrdude: writing flash\navrdude done"
+    printed = capsys.readouterr().out
+    assert "avrdude: writing flash" in printed
+    assert "avrdude done" in printed
+
+
+def test_avrdude_does_not_print_output_when_not_verbose(monkeypatch, context, tmp_path, capsys):
+    (tmp_path / "main.hex").write_text(":00000001FF")
+    context.package_dir = tmp_path
+
+    monkeypatch.setattr(
+        subprocess, "Popen", _capturing_popen({}, output_lines=["avrdude done\n"])
+    )
+
+    result = firmware.execute_avrdude(
+        {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
+        context,
+    )
+
+    assert result.passed
+    assert result.measured["output"] == "avrdude done"
+    assert capsys.readouterr().out == ""
+
+
 def test_avrdude_uses_context_tool_path_override(monkeypatch, context, tmp_path):
     (tmp_path / "main.hex").write_text(":00000001FF")
     context.package_dir = tmp_path
     context.avrdude_path = "/opt/avrdude/bin/avrdude"
 
     captured = {}
-    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+    monkeypatch.setattr(subprocess, "Popen", _capturing_popen(captured))
 
     firmware.execute_avrdude(
         {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
@@ -231,10 +292,10 @@ def test_avrdude_reports_tool_not_found(monkeypatch, context, tmp_path):
     (tmp_path / "main.hex").write_text(":00000001FF")
     context.package_dir = tmp_path
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         raise FileNotFoundError("no such file: avrdude")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = firmware.execute_avrdude(
         {"port": "/dev/ttyUSB0", "programmer_type": "arduino", "mcu": "atmega328p", "firmware_file": "main.hex"},
@@ -249,8 +310,8 @@ def test_avrdude_reports_nonzero_exit_as_failure(monkeypatch, context, tmp_path)
     (tmp_path / "main.hex").write_text(":00000001FF")
     context.package_dir = tmp_path
     monkeypatch.setattr(
-        subprocess, "run",
-        lambda command, **kwargs: _FakeCompletedProcess(returncode=1, stderr="avrdude: verification error"),
+        subprocess, "Popen",
+        _capturing_popen({}, returncode=1, output_lines=["avrdude: verification error\n"]),
     )
 
     result = firmware.execute_avrdude(
@@ -275,7 +336,7 @@ def test_esptool_flashes_multiple_images_in_order(monkeypatch, context, tmp_path
     context.package_dir = tmp_path
 
     captured = {}
-    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+    monkeypatch.setattr(subprocess, "Popen", _capturing_popen(captured))
 
     result = firmware.execute_esptool(
         {
@@ -294,7 +355,7 @@ def test_esptool_flashes_multiple_images_in_order(monkeypatch, context, tmp_path
         "--chip", "esp32",
         "--port", "/dev/ttyUSB0",
         "--baud", "460800",
-        "write_flash",
+        "write-flash",
         "0x1000", str(tmp_path / "bootloader.bin"),
         "0x10000", str(tmp_path / "app.bin"),
     ]
@@ -318,7 +379,7 @@ def test_openocd_builds_program_command_with_flash_address(monkeypatch, context,
     context.package_dir = tmp_path
 
     captured = {}
-    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+    monkeypatch.setattr(subprocess, "Popen", _capturing_popen(captured))
 
     result = firmware.execute_openocd(
         {
@@ -353,7 +414,7 @@ def test_stm32cubeprogrammer_builds_command_with_port_and_flash_address(monkeypa
     context.package_dir = tmp_path
 
     captured = {}
-    monkeypatch.setattr(subprocess, "run", _capturing_run(captured))
+    monkeypatch.setattr(subprocess, "Popen", _capturing_popen(captured))
 
     result = firmware.execute_stm32cubeprogrammer(
         {

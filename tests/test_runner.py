@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from testomatic.runner import TestRunner
+from testomatic.runner import TestRunner, format_report
 from testomatic.suite import Design, TestStep, TestSuiteFile, TestSuiteMeta
 
 
@@ -111,3 +111,21 @@ def test_tool_path_overrides_are_passed_through_to_context(chassis, test_module)
     assert runner.context.esptool_path == "/opt/esptool.py"
     assert runner.context.openocd_path == "/opt/openocd"
     assert runner.context.stm32cubeprogrammer_path == "/opt/STM32_Programmer_CLI"
+
+
+def test_verbose_is_passed_through_to_context(chassis, test_module):
+    runner = TestRunner(chassis, test_module, verbose=True)
+
+    assert runner.context.verbose is True
+
+
+def test_format_report_includes_output_only_when_verbose(chassis, test_module):
+    runner = TestRunner(chassis, test_module)
+    suite = make_suite([
+        make_step(1, "PYTHON", {"python_code": "print('probing sensor')"}),
+    ])
+
+    report = runner.run(suite)
+
+    assert "probing sensor" not in format_report(report, [])
+    assert "probing sensor" in format_report(report, [], verbose=True)

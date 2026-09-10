@@ -10,14 +10,14 @@ abstraction layer.
 Testomatic's test pipeline has four parts, each in its own repo:
 
 1. **Register** — a Test Suite is authored/versioned there, against a PCB `Design`.
-2. **[`testomatic-ui`](https://github.com/SuperHouse/testomatic-ui)** — the on-device touchscreen
+2. **[`testomatic-ui`](https://github.com/SuperHouse/testomatic-ui)**: the on-device touchscreen
    UI. Downloads and caches Test Suite Packages from Register so a device isn't dependent on
    Register being reachable to run a suite it already has.
-3. **This repo (`testomatic-runner`)** — receives a Test Suite Package (a ZIP containing
+3. **This repo (`testomatic-runner`)**: receives a Test Suite Package (a ZIP containing
    `test-suite-definition.json`, documented in [test-suite-package.md](test-suite-package.md)),
    parses it with `testomatic.suite.load_suite()`, and executes each Test Step in order with
    `testomatic.runner.TestRunner`.
-4. **[`testomatic-io`](https://github.com/SuperHouse/testomatic-io)** — carries out each step's
+4. **[`testomatic-io`](https://github.com/SuperHouse/testomatic-io)**: carries out each step's
    hardware action (drive a power rail, read an IOMOD pin, beep, etc.) through its `Chassis`/
    `TestModule` API.
 
@@ -36,7 +36,7 @@ testomatic run path/to/suite-hw1-test-suite-v1.zip
 ```
 
 `import testomatic_io` (and therefore running a suite for real) only works on real Raspberry Pi
-hardware — `testomatic-io` is installed via the `pi` extra rather than as a core dependency, since
+hardware. `testomatic-io` is installed via the `pi` extra rather than as a core dependency, since
 one of its dependencies (`gpiod`) has a native extension that only builds on Linux. See
 [TEST_RUNNER_PLAN.md](TEST_RUNNER_PLAN.md) for what's implemented, what's stubbed, and what's
 still unverified on real hardware.
@@ -45,7 +45,7 @@ still unverified on real hardware.
 
 `pip install -e ".[pi]"` registers a `testomatic` console script (`python -m testomatic` works
 identically, per `__main__.py`). It's the same `load_suite()` → `TestRunner.run()` →
-`format_report()` path `testomatic-ui` drives in-process — this is that path exposed standalone,
+`format_report()` path `testomatic-ui` drives in-process. This is the path exposed standalone,
 with no Django project or Register connection required.
 
 ```
@@ -54,6 +54,7 @@ testomatic run <suite.zip|suite.json>
     [--esptool-path PATH]
     [--openocd-path PATH]
     [--stm32cubeprogrammer-path PATH]
+    [--verbose]
 ```
 
 - `suite_path` — a downloaded Test Suite Package `.zip`, or a bare `test-suite-definition.json`
@@ -63,8 +64,12 @@ testomatic run <suite.zip|suite.json>
   `STM32_Programmer_CLI`) when omitted — pass a path only if that tool isn't on `$PATH` or you
   need a specific one. These are the only device-specific settings the runner takes; everything
   else (serial port, adapter serial, rail assignments, etc.) comes from the suite itself.
+- `--verbose` streams an `UPLOAD_FIRMWARE_*`/`PYTHON` step's tool/console output live as it runs
+  (rather than only after the step finishes), and includes that output in the final report for
+  debugging a firmware upload that's failing or hanging. It's always captured into the step's
+  result regardless of this flag; `--verbose` only controls whether it's also echoed here.
 - Prints the run report (and any `manual_checks`) to stdout via `format_report()`, and exits `0` if
-  the suite passed, `1` otherwise — scriptable in a shell loop or CI-style harness.
+  the suite passed, `1` otherwise: scriptable in a shell loop or CI-style harness.
 
 Example with an overridden esptool location:
 
