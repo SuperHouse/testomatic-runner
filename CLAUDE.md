@@ -98,26 +98,39 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   `registry.STEP_EXECUTORS` via `@register_step(...)` (`registry.py`) — dict-of-functions dispatch,
   not a class hierarchy, since (unlike `testomatic-io`'s IOMOD chip drivers) there's no runtime
   probing involved: the `step_type` is already known from the parsed JSON. `firmware.py`'s 4
-  executors shell out to avrdude/esptool.py/openocd/STM32CubeProgrammer via `subprocess.run()`,
-  resolving firmware files from `context.package_dir` and each defaulting its own tool's
-  executable to the bare name on `$PATH` unless `context.avrdude_path`/`esptool_path`/
-  `openocd_path`/`stm32cubeprogrammer_path` overrides it (set via `TestRunner(...)`/`cli.py`'s
-  `--*-path` options) — see `TEST_RUNNER_PLAN.md`'s "`UPLOAD_FIRMWARE_*`" section for the
-  command-line mapping and what's still unverified on real hardware.
-- `testomatic/steps/base.py` — `ExecutionContext` (hardware handles, `package_dir`, and the 4
-  tool-path overrides above) and `StepResult`, shared by every executor.
+  executors shell out to avrdude/esptool.py/openocd/STM32CubeProgrammer via `subprocess.Popen()`
+  (read line-by-line rather than `subprocess.run()`, so output is available as the tool runs,
+  not only after it exits — see `context.verbose` below), resolving firmware files from
+  `context.package_dir` and each defaulting its own tool's executable to the bare name on
+  `$PATH` unless `context.avrdude_path`/`esptool_path`/`openocd_path`/`stm32cubeprogrammer_path`
+  overrides it (set via `TestRunner(...)`/`cli.py`'s `--*-path` options) — see
+  `TEST_RUNNER_PLAN.md`'s "`UPLOAD_FIRMWARE_*`" section for the command-line mapping and what's
+  still unverified on real hardware. `python_step.py`'s `PYTHON` executor similarly captures
+  `exec()`'s stdout/stderr rather than letting it escape uncaptured. Both always capture their
+  output into `StepResult.measured["output"]` (issue #1) — for a caller like testomatic-ui,
+  getting the `RunReport` back in-process, this needs no separate API — and additionally stream
+  it live to the console when `context.verbose` is set (see `base.py`'s `ExecutionContext` and
+  `cli.py`'s `--verbose` flag below).
+- `testomatic/steps/base.py` — `ExecutionContext` (hardware handles, `package_dir`, the 4
+  tool-path overrides above, and `verbose` — issue #1, asks `firmware.py`/`python_step.py` to
+  stream their captured output live to the console as well as into `StepResult.measured`) and
+  `StepResult`, shared by every executor.
 - `testomatic/runner.py` — `TestRunner.run(suite)` copies `suite.package_dir` onto
   `self.context.package_dir`, then executes `test_steps` in order via the registry, stops and
   turns off all three power rails immediately if an `abort_on_fail` step fails (the one case where
   the runner touches rails on its own initiative — see `TEST_RUNNER_PLAN.md`), and returns a
   `RunReport`; `format_report()` renders it plus the suite's `manual_checks`.
 - `testomatic/cli.py` / `__main__.py` — `python -m testomatic run <suite.zip|suite.json>
-  [--avrdude-path ...] [--esptool-path ...] [--openocd-path ...] [--stm32cubeprogrammer-path ...]`
-  entry point; accepts either a Test Suite Package ZIP or a bare Test Suite Definition JSON file,
-  since it just forwards its argument to `suite.load_suite()`, and forwards the 4 optional
-  `--*-path` overrides straight through to `TestRunner(...)`. Only importable/runnable on real
-  Raspberry Pi hardware (imports `testomatic_io` at call time) — confirmed working on a real
-  chassis for `BEEP`/`READ_RAIL_VOLTAGE`; see `TEST_RUNNER_PLAN.md` for what's still unverified.
+  [--avrdude-path ...] [--esptool-path ...] [--openocd-path ...] [--stm32cubeprogrammer-path ...]
+  [--verbose]` entry point; accepts either a Test Suite Package ZIP or a bare Test Suite
+  Definition JSON file, since it just forwards its argument to `suite.load_suite()`, and
+  forwards the 4 optional `--*-path` overrides plus `--verbose` straight through to
+  `TestRunner(...)`. `--verbose` (issue #1) streams a firmware/Python step's output live as it
+  runs and includes it in `format_report()`'s final text; without it, that output is still
+  captured (see `steps/` above) but only shown if a caller reads `StepResult.measured` itself.
+  Only importable/runnable on real Raspberry Pi hardware (imports `testomatic_io` at call time)
+  — confirmed working on a real chassis for `BEEP`/`READ_RAIL_VOLTAGE`; see `TEST_RUNNER_PLAN.md`
+  for what's still unverified.
 - `tests/conftest.py` — `FakeChassis`/`FakePower`/`FakeBeeper`/`FakeIomod` doubles (as pytest
   fixtures `chassis`/`test_module`/`context`) standing in for real `testomatic-io` hardware, since
   step executors only ever duck-type against whatever `chassis` object they're given.
