@@ -43,6 +43,11 @@ class TestStep:
     abort_on_fail: bool
     config_schema_version: int | None
     config: dict
+    # issue #123: whether this step is printed on testomatic-ui's Test Docket when it passes -
+    # always executed/recorded regardless, and a failing step is always printed regardless too.
+    # Defaults True so a Test Suite Package exported before this field existed still parses as
+    # "print every step", matching what it actually did at the time.
+    include_on_docket: bool = True
 
 
 @dataclass(frozen=True)
@@ -191,6 +196,7 @@ def _parse_test_step(data: dict) -> TestStep:
         abort_on_fail=data.get("abort_on_fail", False),
         config_schema_version=config_schema_version,
         config=config,
+        include_on_docket=data.get("include_on_docket", True),
     )
 
 

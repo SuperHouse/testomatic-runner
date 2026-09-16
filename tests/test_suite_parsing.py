@@ -147,6 +147,30 @@ def test_rejects_config_schema_version_mismatch():
         parse_suite(_envelope(test_steps=[step]))
 
 
+def test_include_on_docket_defaults_true_when_absent():
+    """A Test Suite Package exported before issue #123 added this field has no
+    include_on_docket key at all - it must still parse as "print every step", matching what it
+    actually did at the time."""
+    step = {
+        "order": 1, "step_type": "DELAY", "name": "a", "abort_on_fail": False,
+        "config_schema_version": 1, "config": {"schema_version": 1, "delay_ms": 1},
+    }
+    suite = parse_suite(_envelope(test_steps=[step]))
+
+    assert suite.test_steps[0].include_on_docket is True
+
+
+def test_include_on_docket_round_trips_when_present():
+    step = {
+        "order": 1, "step_type": "DELAY", "name": "a", "abort_on_fail": False,
+        "config_schema_version": 1, "config": {"schema_version": 1, "delay_ms": 1},
+        "include_on_docket": False,
+    }
+    suite = parse_suite(_envelope(test_steps=[step]))
+
+    assert suite.test_steps[0].include_on_docket is False
+
+
 def test_optional_notes_defaults_to_none():
     envelope = _envelope()
     del envelope["test_suite"]["notes"]

@@ -108,6 +108,7 @@ shape, regardless of type:
 | `step_type` | string | One of the step type codes listed below |
 | `name` | string | The step's display name |
 | `abort_on_fail` | boolean | If `true`, a failure of this step stops the rest of the suite |
+| `include_on_docket` | boolean | If `true` (the default when absent), this step is printed on the Test Docket when it passes. Always executed and recorded regardless of this value, and a failing step is always printed regardless too |
 | `config_schema_version` | integer or `null` | The schema version of `config` below (`null` if the step predates schema versioning) |
 | `config` | object | Type-specific configuration fields. See [Test Step types](#test-step-types) below |
 
@@ -351,6 +352,7 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "DELAY",
       "name": "Settle",
       "abort_on_fail": false,
+      "include_on_docket": false,
       "config_schema_version": 1,
       "config": { "schema_version": 1, "delay_ms": 250 }
     },
@@ -359,6 +361,7 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "UPLOAD_FIRMWARE_AVRDUDE",
       "name": "Program microcontroller",
       "abort_on_fail": true,
+      "include_on_docket": true,
       "config_schema_version": 1,
       "config": {
         "schema_version": 1,
@@ -373,6 +376,7 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "READ_RAIL_VOLTAGE",
       "name": "Check 5V rail",
       "abort_on_fail": true,
+      "include_on_docket": true,
       "config_schema_version": 1,
       "config": { "schema_version": 1, "rail": "5V", "min_v": 4.8, "max_v": 5.2 }
     },
@@ -381,6 +385,7 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "LED_SPECTRAL_READING",
       "name": "Check status LED",
       "abort_on_fail": false,
+      "include_on_docket": true,
       "config_schema_version": 1,
       "config": {
         "schema_version": 1,

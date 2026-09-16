@@ -58,7 +58,7 @@ when working on anything that crosses a boundary — don't rely on summaries her
   design (Fusion 360, EAGLE/KiCAD, DXF, STL) this runner and `testomatic-io` drive. Also holds
   `PinAllocation.md` and the colour-sensor hardware (`ColourSensor/`) that the deferred
   `LED_SPECTRAL_READING` step type will eventually use.
-- **Register** (`/Users/jon/Dropbox/src/register-macbook`, Django app under `pyproj/`) — the
+- **Register** (`/Users/jon/Dropbox/src/register`, Django app under `pyproj/`) — the
   central production/test database. Its `testing` app defines `TestSuite`/`TestStep`/
   `ManualCheck` models, staff-edited per PCB `Design`, and currently serves a Test Suite Package
   (a ZIP containing `test-suite-definition.json`) for download, in the format documented in
