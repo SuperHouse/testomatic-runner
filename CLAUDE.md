@@ -110,7 +110,16 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   output into `StepResult.measured["output"]` (issue #1) — for a caller like testomatic-ui,
   getting the `RunReport` back in-process, this needs no separate API — and additionally stream
   it live to the console when `context.verbose` is set (see `base.py`'s `ExecutionContext` and
-  `cli.py`'s `--verbose` flag below).
+  `cli.py`'s `--verbose` flag below). `power.py`'s `READ_RAIL_VOLTAGE`/`READ_RAIL_CURRENT` and
+  `iomod.py`'s `IOMOD_ANALOG_READ`/`IOMOD_DIGITAL_READ` also set `StepResult.measured["display"]`
+  (testomatic-ui#13) — a short, pre-formatted value string (e.g. `"5.01V"`, `"2048"`) alongside
+  the raw numeric/string value already in `measured`, for a caller like testomatic-ui's Test
+  Docket to show next to a passing check without needing its own per-step-type formatting logic;
+  a step type with nothing to measure just leaves it unset. `firmware.py` also defines
+  `FIRMWARE_STEP_TYPES` (the 4 `UPLOAD_FIRMWARE_*` type strings, re-exported from
+  `testomatic.steps`) specifically so a caller building a report/docket can pick those steps out
+  of a `RunReport` as a special case — see testomatic-ui's `docket.py` (register#124), which
+  imports it directly rather than re-duplicating the 4 strings.
 - `testomatic/steps/base.py` — `ExecutionContext` (hardware handles, `package_dir`, the 4
   tool-path overrides above, and `verbose` — issue #1, asks `firmware.py`/`python_step.py` to
   stream their captured output live to the console as well as into `StepResult.measured`) and
