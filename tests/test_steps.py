@@ -130,6 +130,7 @@ def test_read_rail_voltage_within_range_passes(context):
 
     assert result.passed
     assert result.measured["voltage"] == 3.3
+    assert result.measured["display"] == "3.30V"
 
 
 def test_read_rail_voltage_out_of_range_fails(context):
@@ -143,6 +144,7 @@ def test_read_rail_current_within_range_passes(context):
 
     assert result.passed
     assert result.measured["current"] == 200.0
+    assert result.measured["display"] == "200.0mA"
 
 
 def test_iomod_digital_write_then_read_roundtrip(context):
@@ -153,6 +155,7 @@ def test_iomod_digital_write_then_read_roundtrip(context):
 
     read_result = iomod.execute_digital_read({"iomod": "C", "pin": "4", "expect": "1"}, context)
     assert read_result.passed
+    assert read_result.measured["display"] == "1"
 
 
 def test_iomod_digital_read_mismatch_fails(context):
@@ -170,6 +173,7 @@ def test_iomod_analog_read_checks_range(context):
 
     assert result.passed
     assert result.measured["value"] == 2048
+    assert result.measured["display"] == "2048"
 
 
 def test_iomod_analog_write_records_value(context):

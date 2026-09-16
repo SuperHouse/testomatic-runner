@@ -40,7 +40,11 @@ def execute_read_voltage(config: dict, context: ExecutionContext) -> StepResult:
     reading = getattr(context.chassis.power, _RAIL_READ[rail])()
     passed = min_v <= reading.voltage <= max_v
     message = f"{rail} rail: {reading.voltage:.3f}V (expected {min_v}-{max_v}V)"
-    return StepResult(passed=passed, message=message, measured={"voltage": reading.voltage})
+    # issue testomatic-ui#13: "display" is the short, pre-formatted value a caller like
+    # testomatic-ui's Test Docket shows next to PASS - kept alongside the raw "voltage" value
+    # (unrounded, used for anything that needs the actual number) rather than replacing it.
+    display = f"{reading.voltage:.2f}V"
+    return StepResult(passed=passed, message=message, measured={"voltage": reading.voltage, "display": display})
 
 
 @register_step("READ_RAIL_CURRENT")
@@ -51,4 +55,5 @@ def execute_read_current(config: dict, context: ExecutionContext) -> StepResult:
     reading = getattr(context.chassis.power, _RAIL_READ[rail])()
     passed = min_ma <= reading.current <= max_ma
     message = f"{rail} rail: {reading.current:.1f}mA (expected {min_ma}-{max_ma}mA)"
-    return StepResult(passed=passed, message=message, measured={"current": reading.current})
+    display = f"{reading.current:.1f}mA"
+    return StepResult(passed=passed, message=message, measured={"current": reading.current, "display": display})

@@ -19,7 +19,9 @@ def execute_digital_read(config: dict, context: ExecutionContext) -> StepResult:
     return StepResult(
         passed=passed,
         message=f"IOMOD {iomod} pin {pin}: read {actual}, expected {expect}",
-        measured={"value": actual},
+        # "display" (issue testomatic-ui#13): the short value a caller like testomatic-ui's Test
+        # Docket shows next to PASS.
+        measured={"value": actual, "display": actual},
     )
 
 
@@ -52,7 +54,7 @@ def execute_analog_read(config: dict, context: ExecutionContext) -> StepResult:
     return StepResult(
         passed=passed,
         message=f"IOMOD {iomod} pin {pin}: read {value}",
-        measured={"value": value},
+        measured={"value": value, "display": str(value)},
     )
 
 
