@@ -28,6 +28,18 @@ from pathlib import Path
 from .base import ExecutionContext, StepResult
 from .registry import register_step
 
+# Register issue #124: a caller building a report/docket needs to pick these 4 step types out of
+# a RunReport as a special case (collecting their names as the firmware versions on the board),
+# separately from the pass/fail line every other step type also gets — see
+# testomatic-ui's test_suites/docket.py, which imports this set directly rather than
+# re-duplicating the 4 type strings, since testomatic-ui already depends on this package.
+FIRMWARE_STEP_TYPES = frozenset({
+    "UPLOAD_FIRMWARE_AVRDUDE",
+    "UPLOAD_FIRMWARE_ESPTOOL",
+    "UPLOAD_FIRMWARE_OPENOCD",
+    "UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER",
+})
+
 
 def _resolve_file(context: ExecutionContext, filename: str) -> tuple[Path | None, str | None]:
     """Resolves `filename` against `context.package_dir`. Returns `(path, None)` on success, or

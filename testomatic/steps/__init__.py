@@ -13,6 +13,7 @@ from . import (  # noqa: F401 -- imported for their @register_step side effects
     python_step,
 )
 from .base import ExecutionContext, StepResult
+from .firmware import FIRMWARE_STEP_TYPES
 from .registry import STEP_EXECUTORS, get_executor, register_step
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "STEP_EXECUTORS",
     "get_executor",
     "register_step",
+    "FIRMWARE_STEP_TYPES",
 ]
