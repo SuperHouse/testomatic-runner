@@ -171,6 +171,35 @@ def test_include_on_docket_round_trips_when_present():
     assert suite.test_steps[0].include_on_docket is False
 
 
+def test_diagnostic_defaults_to_nothing_when_absent():
+    """A Test Suite Package exported before register#127 added this field has no `diagnostic`
+    key at all - it must still parse as "nothing to show", matching what it actually did at the
+    time."""
+    step = {
+        "order": 1, "step_type": "DELAY", "name": "a", "abort_on_fail": False,
+        "config_schema_version": 1, "config": {"schema_version": 1, "delay_ms": 1},
+    }
+    suite = parse_suite(_envelope(test_steps=[step]))
+
+    assert suite.test_steps[0].diagnostic_note is None
+    assert suite.test_steps[0].diagnostic_images == []
+
+
+def test_diagnostic_round_trips_when_present():
+    step = {
+        "order": 1, "step_type": "DELAY", "name": "a", "abort_on_fail": False,
+        "config_schema_version": 1, "config": {"schema_version": 1, "delay_ms": 1},
+        "diagnostic": {
+            "note": "Check U3 for a cold solder joint.",
+            "images": ["diagnostics/1/u3-location.jpg"],
+        },
+    }
+    suite = parse_suite(_envelope(test_steps=[step]))
+
+    assert suite.test_steps[0].diagnostic_note == "Check U3 for a cold solder joint."
+    assert suite.test_steps[0].diagnostic_images == ["diagnostics/1/u3-location.jpg"]
+
+
 def test_optional_notes_defaults_to_none():
     envelope = _envelope()
     del envelope["test_suite"]["notes"]

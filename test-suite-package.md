@@ -48,11 +48,24 @@ firmware binary named by a firmware-upload step's `firmware_file` field (or, for
 `test-suite-definition.json` in the same folder; a consumer resolves those filenames relative to
 it (see [Example](#example) below).
 
+A step's diagnostic images (see [Diagnostic info](#diagnostic-info) below) are the one exception
+to this flat layout — each step's images sit in their own subfolder instead, keyed by that Test
+Step's database ID:
+
+```
+abc123-hw1-0-test-suite-v3/
+├── test-suite-definition.json
+└── diagnostics/
+    └── 42/
+        └── u3-location.jpg
+```
+
 These files come from binaries uploaded directly on the Test Step's own edit page (see
 [Test Suites](../user-guide/test-suites.md)), not typed in as plain text — the Register always
-bundles the exact bytes that were uploaded, so `firmware_file`/`images[].file` are guaranteed to
-resolve to a real file inside the package. Two different steps in the same Test Suite can never
-attach a file with the same name, so this flat, single-folder layout can never have one step's
+bundles the exact bytes that were uploaded, so `firmware_file`/`images[].file`/a diagnostic
+image's path are guaranteed to resolve to a real file inside the package. Two different steps in
+the same Test Suite can never attach a firmware file with the same name, so this flat,
+single-folder layout can never have one step's
 file silently overwrite another's.
 
 ## Test Suite Definition format
@@ -108,14 +121,33 @@ shape, regardless of type:
 | `step_type` | string | One of the step type codes listed below |
 | `name` | string | The step's display name |
 | `abort_on_fail` | boolean | If `true`, a failure of this step stops the rest of the suite |
-| `include_on_docket` | boolean | If `true` (the default when absent), this step is printed on the Test Docket when it passes. Always executed and recorded regardless of this value, and a failing step is always printed regardless too |
 | `config_schema_version` | integer or `null` | The schema version of `config` below (`null` if the step predates schema versioning) |
 | `config` | object | Type-specific configuration fields. See [Test Step types](#test-step-types) below |
+| `diagnostic` | object | Optional. Guidance for an operator when this step fails. See [Diagnostic info](#diagnostic-info) below |
 
 `config_schema_version` copies the `schema_version` key already inside `config`. The Register
 places it at this outer level so a consumer does not need to open the nested object to find it.
 This number increases only when a step type's own config fields change shape. It is independent
 of `export_schema_version` above.
+
+### Diagnostic info
+
+A step may carry optional diagnostic guidance for an operator to use when the step fails - for
+example, a note about which part of the board to check, plus photos showing where to look. When
+a step has neither a note nor any images, the Register omits the `diagnostic` key entirely
+(rather than including it as `null`) - the same "absent means nothing to show" convention used
+throughout this format. This is purely additive: it does not change `export_schema_version`.
+
+| Field | Type | Description |
+|---|---|---|
+| `note` | string | Free-text guidance shown to the operator |
+| `images` | array of strings | Filenames of attached images, each resolved relative to the Test Suite Package root (see [Package contents](#package-contents) above) |
+
+Unlike a firmware-upload step's `firmware_file`/`images`, which sit flat alongside
+`test-suite-definition.json`, diagnostic images live under a per-step subfolder,
+`diagnostics/{test step database ID}/`, inside the package. This means two different steps can
+attach an image with the same filename without any risk of one overwriting the other - there is
+no cross-step filename restriction for diagnostic images, unlike firmware files.
 
 ### `manual_checks`
 
@@ -319,13 +351,17 @@ types, it does not take an automated reading.
 
 ## Example
 
-A Test Suite Package for a board with an `UPLOAD_FIRMWARE_AVRDUDE` step unzips to:
+A Test Suite Package for a board with an `UPLOAD_FIRMWARE_AVRDUDE` step and a diagnostic image on
+its `READ_RAIL_VOLTAGE` step (database ID 44) unzips to:
 
 ```
 abc123-hw1-0-test-suite-v3.zip
 └── abc123-hw1-0-test-suite-v3/
     ├── test-suite-definition.json
-    └── main.hex
+    ├── main.hex
+    └── diagnostics/
+        └── 44/
+            └── u3-location.jpg
 ```
 
 `test-suite-definition.json`:
@@ -352,7 +388,6 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "DELAY",
       "name": "Settle",
       "abort_on_fail": false,
-      "include_on_docket": false,
       "config_schema_version": 1,
       "config": { "schema_version": 1, "delay_ms": 250 }
     },
@@ -361,7 +396,6 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "UPLOAD_FIRMWARE_AVRDUDE",
       "name": "Program microcontroller",
       "abort_on_fail": true,
-      "include_on_docket": true,
       "config_schema_version": 1,
       "config": {
         "schema_version": 1,
@@ -376,16 +410,18 @@ abc123-hw1-0-test-suite-v3.zip
       "step_type": "READ_RAIL_VOLTAGE",
       "name": "Check 5V rail",
       "abort_on_fail": true,
-      "include_on_docket": true,
       "config_schema_version": 1,
-      "config": { "schema_version": 1, "rail": "5V", "min_v": 4.8, "max_v": 5.2 }
+      "config": { "schema_version": 1, "rail": "5V", "min_v": 4.8, "max_v": 5.2 },
+      "diagnostic": {
+        "note": "Check the 5V regulator, U3, for a cold solder joint.",
+        "images": ["diagnostics/44/u3-location.jpg"]
+      }
     },
     {
       "order": 4,
       "step_type": "LED_SPECTRAL_READING",
       "name": "Check status LED",
       "abort_on_fail": false,
-      "include_on_docket": true,
       "config_schema_version": 1,
       "config": {
         "schema_version": 1,

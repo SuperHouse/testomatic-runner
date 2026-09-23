@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 SUPPORTED_EXPORT_SCHEMA_VERSION = 1
@@ -48,6 +48,14 @@ class TestStep:
     # Defaults True so a Test Suite Package exported before this field existed still parses as
     # "print every step", matching what it actually did at the time.
     include_on_docket: bool = True
+    # register#127: operator-facing guidance for when this step fails - a free-text note plus
+    # zero or more image filenames, resolved relative to `package_dir` (see `TestSuiteFile`
+    # below) same as a firmware step's `firmware_file`/`images`. Both default to "nothing to
+    # show" so a Test Suite Package exported before this field existed still parses cleanly -
+    # neither is executed on, only read by a caller (e.g. testomatic-ui) off a failed
+    # StepOutcome to show the operator.
+    diagnostic_note: str | None = None
+    diagnostic_images: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -189,6 +197,8 @@ def _parse_test_step(data: dict) -> TestStep:
             f"({inner_version})"
         )
 
+    diagnostic = data.get("diagnostic") or {}
+
     return TestStep(
         order=_require(data, "order"),
         step_type=_require(data, "step_type"),
@@ -197,6 +207,8 @@ def _parse_test_step(data: dict) -> TestStep:
         config_schema_version=config_schema_version,
         config=config,
         include_on_docket=data.get("include_on_docket", True),
+        diagnostic_note=diagnostic.get("note"),
+        diagnostic_images=diagnostic.get("images", []),
     )
 
 

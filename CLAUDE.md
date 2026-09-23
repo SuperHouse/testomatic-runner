@@ -128,7 +128,13 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   `self.context.package_dir`, then executes `test_steps` in order via the registry, stops and
   turns off all three power rails immediately if an `abort_on_fail` step fails (the one case where
   the runner touches rails on its own initiative — see `TEST_RUNNER_PLAN.md`), and returns a
-  `RunReport`; `format_report()` renders it plus the suite's `manual_checks`.
+  `RunReport`; `format_report()` renders it plus the suite's `manual_checks`. Each `StepOutcome`
+  in `RunReport.outcomes` carries the full parsed `TestStep` (not just its result), so a caller
+  inspecting a failed outcome already has `outcome.step.diagnostic_note`/`.diagnostic_images`
+  (register#127) available with no separate lookup — this repo does nothing with those two
+  fields itself beyond parsing them (see `suite.py` below); testomatic-ui's `test_suite_run`
+  reads them straight off `RunReport.outcomes` to show an operator what to check when a step
+  fails.
 - `testomatic/cli.py` / `__main__.py` — `python -m testomatic run <suite.zip|suite.json>
   [--avrdude-path ...] [--esptool-path ...] [--openocd-path ...] [--stm32cubeprogrammer-path ...]
   [--verbose]` entry point; accepts either a Test Suite Package ZIP or a bare Test Suite
@@ -168,8 +174,9 @@ pytest
 This is the key contract for any test-runner code added here. A Test Suite Definition is one JSON
 object with four top-level keys: `design`, `test_suite`, `test_steps` (array, execution order),
 and `manual_checks` (array). Each `test_steps` entry has a fixed outer shape
-(`order`, `step_type`, `name`, `abort_on_fail`, `config_schema_version`, `config`) with a
-`step_type`-specific `config` payload. Known step types: `DELAY`, `UPLOAD_FIRMWARE_AVRDUDE`,
+(`order`, `step_type`, `name`, `abort_on_fail`, `config_schema_version`, `config`, plus the
+optional `include_on_docket` and `diagnostic` — see below) with a `step_type`-specific `config`
+payload. Known step types: `DELAY`, `UPLOAD_FIRMWARE_AVRDUDE`,
 `UPLOAD_FIRMWARE_ESPTOOL`, `UPLOAD_FIRMWARE_OPENOCD`, `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER`,
 `BEEP`, `READ_RAIL_VOLTAGE`, `READ_RAIL_CURRENT`, `CONTROL_POWER_RAIL`, `PYTHON`,
 `IOMOD_ANALOG_READ`, `IOMOD_DIGITAL_READ`, `IOMOD_DIGITAL_WRITE`, `IOMOD_ANALOG_WRITE`,
@@ -177,7 +184,14 @@ and `manual_checks` (array). Each `test_steps` entry has a fixed outer shape
 null when unset — a consumer must apply its own default, not expect `null`/empty.
 `export_schema_version` versions the envelope shape; each step's `config_schema_version`
 independently versions that step type's own config shape — don't conflate the two when adding
-parsing logic.
+parsing logic. A step's optional `diagnostic` key (register#127 — `{'note': ..., 'images': [...]}`,
+`images` filenames resolved relative to `package_dir` same as a firmware step's `firmware_file`)
+carries operator-facing guidance for when that step fails; `suite.py`'s `TestStep` dataclass
+parses it into `diagnostic_note`/`diagnostic_images` (both defaulting to "nothing to show" when
+the key is absent), and — like `include_on_docket` — this is purely additive and doesn't bump
+`export_schema_version`. Unlike a firmware step's files, diagnostic images sit under a per-step
+`diagnostics/{step id}/` subfolder in the package rather than flat alongside
+`test-suite-definition.json`.
 
 ## Hardware I/O reference
 
