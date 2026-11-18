@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import time
 
+import pytest
+
 from testomatic.steps import (
     beep,
     delay,
@@ -445,8 +447,57 @@ def test_stm32cubeprogrammer_fails_when_no_firmware_file_attached(context):
     assert "No firmware file attached" in result.message
 
 
-def test_led_spectral_reading_stub_prints_and_passes(context, capsys):
-    result = led_spectral.execute({}, context)
+def test_led_spectral_reading_parses_hex_addresses_and_mux_channel(context):
+    led_spectral.execute({"i2c_addr": "0x10", "mux_addr": "0x71", "mux_chan": "0"}, context)
+
+    assert context.chassis.colour_sensor.calls == [(0x10, 0x71, 0)]
+
+
+def test_led_spectral_reading_without_mux(context):
+    led_spectral.execute({"i2c_addr": "0x10", "mux_chan": "0"}, context)
+
+    assert context.chassis.colour_sensor.calls == [(0x10, None, None)]
+
+
+def test_led_spectral_reading_with_no_limits_passes_and_reports_all_channels(context):
+    result = led_spectral.execute({"i2c_addr": "0x10", "mux_addr": "0x71", "mux_chan": "0"}, context)
 
     assert result.passed
-    assert "LED test" in capsys.readouterr().out
+    assert result.message == "R1200 G3000 B800 IR150 C5000 9.0lx"
+    assert result.measured["red"] == 1200
+    assert result.measured["clear"] == 5000
+    assert result.measured["display"] == "R1200 G3000 B800 IR150 C5000 9.0lx"
+
+
+def test_led_spectral_reading_within_limits_passes(context):
+    config = {"i2c_addr": "0x10", "mux_chan": "0", "r_min": 1000, "r_max": 1500, "lux_min": 5}
+
+    result = led_spectral.execute(config, context)
+
+    assert result.passed
+
+
+def test_led_spectral_reading_out_of_range_fails_naming_each_channel(context):
+    config = {"i2c_addr": "0x10", "mux_chan": "0", "g_max": 2000, "b_min": 900, "ir_max": 500}
+
+    result = led_spectral.execute(config, context)
+
+    assert not result.passed
+    assert "g 3000 (max 2000)" in result.message
+    assert "b 800 (min 900)" in result.message
+    assert result.message.startswith("Out of range: ")
+    assert "ir 150" not in result.message
+
+
+def test_led_spectral_reading_out_of_range_with_both_limits(context):
+    result = led_spectral.execute({"i2c_addr": "0x10", "mux_chan": "0", "r_min": 100, "r_max": 255}, context)
+
+    assert not result.passed
+    assert "r 1200 (expected 100-255)" in result.message
+
+
+def test_led_spectral_reading_sensor_error_propagates_to_runner(context):
+    context.chassis.colour_sensor.error = RuntimeError("No VEML3328SL colour sensor responding")
+
+    with pytest.raises(RuntimeError, match="No VEML3328SL"):
+        led_spectral.execute({"i2c_addr": "0x10", "mux_chan": "0"}, context)

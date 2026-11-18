@@ -70,11 +70,30 @@ class FakeIomod:
         self.analog[(module_id, pin)] = value
 
 
+ColourReading = namedtuple("ColourReading", ["clear", "red", "green", "blue", "ir", "lux"])
+
+
+class FakeColourSensor:
+    """Mirrors testomatic_io.colour_sensor.ColourSensor.read(); records each call's arguments."""
+
+    def __init__(self):
+        self.reading = ColourReading(clear=5000, red=1200, green=3000, blue=800, ir=150, lux=9.0)
+        self.calls = []
+        self.error = None
+
+    def read(self, i2c_addr=0x10, mux_addr=None, mux_chan=None, integration_ms=100):
+        self.calls.append((i2c_addr, mux_addr, mux_chan))
+        if self.error is not None:
+            raise self.error
+        return self.reading
+
+
 class FakeChassis:
     def __init__(self):
         self.power = FakePower()
         self.beeper = FakeBeeper()
         self.iomod = FakeIomod()
+        self.colour_sensor = FakeColourSensor()
 
 
 class FakeTestModule:

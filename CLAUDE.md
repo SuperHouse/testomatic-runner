@@ -56,8 +56,8 @@ when working on anything that crosses a boundary — don't rely on summaries her
   the `pi` extra rather than as a core dependency.
 - **`Testomatic`** (`~/Dropbox/src/Testomatic`) — the physical chassis/PCB/Test Module hardware
   design (Fusion 360, EAGLE/KiCAD, DXF, STL) this runner and `testomatic-io` drive. Also holds
-  `PinAllocation.md` and the colour-sensor hardware (`ColourSensor/`) that the deferred
-  `LED_SPECTRAL_READING` step type will eventually use.
+  `PinAllocation.md` and the colour-sensor hardware (`ColourSensor/`, a VEML3328SL) that the
+  `LED_SPECTRAL_READING` step type reads via testomatic-io's `chassis.colour_sensor`.
 - **Register** (`/Users/jon/Dropbox/src/register`, Django app under `pyproj/`) — the
   central production/test database. Its `testing` app defines `TestSuite`/`TestStep`/
   `ManualCheck` models, staff-edited per PCB `Design`, and currently serves a Test Suite Package
@@ -92,8 +92,8 @@ plan, including what's done vs. still pending real-hardware verification, lives 
 - `testomatic/steps/` — one executor module per `step_type` (or closely-related group of
   `step_type`s — `power.py` covers `CONTROL_POWER_RAIL`/`READ_RAIL_VOLTAGE`/`READ_RAIL_CURRENT`,
   `firmware.py` covers the 4 `UPLOAD_FIRMWARE_*` types): `delay.py`, `beep.py`, `power.py`,
-  `iomod.py`, `python_step.py`, `operator_intervention.py`, `firmware.py`, plus the deferred stub
-  `led_spectral.py` — see `TEST_RUNNER_PLAN.md`'s "Deferred work". Each executor is a plain
+  `iomod.py`, `python_step.py`, `operator_intervention.py`, `firmware.py`, `led_spectral.py`.
+  Each executor is a plain
   `(config, context) -> StepResult` function registered against its `step_type` string in
   `registry.STEP_EXECUTORS` via `@register_step(...)` (`registry.py`) — dict-of-functions dispatch,
   not a class hierarchy, since (unlike `testomatic-io`'s IOMOD chip drivers) there's no runtime
@@ -111,7 +111,7 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   getting the `RunReport` back in-process, this needs no separate API — and additionally stream
   it live to the console when `context.verbose` is set (see `base.py`'s `ExecutionContext` and
   `cli.py`'s `--verbose` flag below). `power.py`'s `READ_RAIL_VOLTAGE`/`READ_RAIL_CURRENT` and
-  `iomod.py`'s `IOMOD_ANALOG_READ`/`IOMOD_DIGITAL_READ` also set `StepResult.measured["display"]`
+  `iomod.py`'s `IOMOD_ANALOG_READ`/`IOMOD_DIGITAL_READ` and `led_spectral.py` also set `StepResult.measured["display"]`
   (testomatic-ui#13) — a short, pre-formatted value string (e.g. `"5.01V"`, `"2048"`) alongside
   the raw numeric/string value already in `measured`, for a caller like testomatic-ui's Test
   Docket to show next to a passing check without needing its own per-step-type formatting logic;
@@ -146,7 +146,7 @@ plan, including what's done vs. still pending real-hardware verification, lives 
   Only importable/runnable on real Raspberry Pi hardware (imports `testomatic_io` at call time)
   — confirmed working on a real chassis for `BEEP`/`READ_RAIL_VOLTAGE`; see `TEST_RUNNER_PLAN.md`
   for what's still unverified.
-- `tests/conftest.py` — `FakeChassis`/`FakePower`/`FakeBeeper`/`FakeIomod` doubles (as pytest
+- `tests/conftest.py` — `FakeChassis`/`FakePower`/`FakeBeeper`/`FakeIomod`/`FakeColourSensor` doubles (as pytest
   fixtures `chassis`/`test_module`/`context`) standing in for real `testomatic-io` hardware, since
   step executors only ever duck-type against whatever `chassis` object they're given.
 - `test-suite-package.md` — reference documentation (copied from the Register project) describing

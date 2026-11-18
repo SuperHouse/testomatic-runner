@@ -48,7 +48,7 @@ testomatic-runner/
       registry.py          # STEP_EXECUTORS: dict[str, StepExecutor] + @register_step — done
       delay.py, beep.py, power.py, iomod.py, python_step.py, operator_intervention.py  # done
       firmware.py           # 4 UPLOAD_FIRMWARE_* executors, one per tool — done, unverified on real hardware
-      led_spectral.py       # stub for now — see Deferred work below — done
+      led_spectral.py       # chassis.colour_sensor read + min/max checks — done, unverified as a step on hardware
     runner.py              # TestRunner: iterate steps, call executor, honour abort_on_fail, build report — done
     cli.py                 # entry point, `python -m testomatic run suite.zip|suite.json` — done,
                              # confirmed working on real hardware for BEEP/READ_RAIL_VOLTAGE
@@ -86,7 +86,7 @@ module.
 | `UPLOAD_FIRMWARE_ESPTOOL` | `subprocess.Popen(["esptool.py", "--chip", chip, "--port", port, ..., "write-flash", addr1, file1, addr2, file2, ...])` |
 | `UPLOAD_FIRMWARE_OPENOCD` | `subprocess.Popen(["openocd", "-f", interface_config, "-f", target_config, ..., "-c", f"program {firmware_file} ... verify reset exit"])` |
 | `UPLOAD_FIRMWARE_STM32CUBEPROGRAMMER` | `subprocess.Popen(["STM32_Programmer_CLI", "-c", f"port={connection_interface} ...", "-w", firmware_file, ..., "-v", "-rst"])` |
-| `LED_SPECTRAL_READING` | stub for now — prints `"LED test"` and returns a pass. See Deferred work below |
+| `LED_SPECTRAL_READING` | `chassis.colour_sensor.read(i2c_addr, mux_addr=..., mux_chan=...)`, then check each `r/g/b/ir/lux` `_min`/`_max` limit that's set |
 
 ### BEEP timing
 
@@ -113,15 +113,11 @@ part of normal step execution, so it belongs in `runner.py`'s abort-on-fail hand
 
 ## Deferred work (stubbed for v1)
 
-1. **`LED_SPECTRAL_READING`** needs the VEML3328SL colour sensor (`ColourSensor/` in the sibling
-   `Testomatic` repo),
-   reached through an I2C address plus an optional mux channel/address. `testomatic-io`'s
-   `Chassis` facade has no colour-sensor subsystem yet — only `iomod`, `power`, `interrupts`,
-   `button`, `beeper`, `hat_eeprom`. A driver for this sensor already exists elsewhere and will be
-   wired in later, either as a `chassis.colour_sensor` subsystem in `testomatic-io` (consistent
-   with how it wraps INA260/EEPROM via `i2c_probe.py`) or directly in this executor — not decided
-   yet. **For now**, `steps/led_spectral.py` is a stub that just prints `"LED test"` and returns a
-   pass `StepResult`, so suites containing this step type can still run end-to-end.
+Nothing currently. `LED_SPECTRAL_READING` was here until 2026-11-18; it's now implemented on top
+of testomatic-io's `chassis.colour_sensor` (VEML3328SL). That subsystem's register sequence was
+first verified by hand on Tester3 (mux 0x71, channel 0, sensor 0x10), but the step itself hasn't
+yet run on real hardware. The lux value is the datasheet's green-channel estimate, only approximate
+for non-white LEDs.
 
 ## `UPLOAD_FIRMWARE_*` (Phase 5 — implemented, unverified on real hardware)
 
